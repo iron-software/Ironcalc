@@ -3078,6 +3078,26 @@ impl<'a> Model<'a> {
         self.evaluate_conditional_formatting();
     }
 
+    /// Recalculates only the given formula cells, as `(sheet, row, column)`, and keeps the last result
+    /// of every other formula (IronXL).
+    ///
+    /// A given cell that reads another given cell recalculates it first, so the order of `cells` does
+    /// not matter. A formula that is not given keeps the result of the last evaluation, even if one of
+    /// its inputs changed. The caller passes every stale formula that the result depends on.
+    ///
+    /// Use [`Model::evaluate()`] for the whole workbook, for a change that can move a dynamic-array
+    /// spill area, and to refresh conditional formatting: this method does not do either.
+    pub fn evaluate_cells(&mut self, cells: &[(u32, i32, i32)]) {
+        self.clear_variable_stack();
+        self.clear_lambdas();
+        for key in cells {
+            self.cells.remove(key);
+        }
+        for &(sheet, row, column) in cells {
+            self.evaluate_cell(CellReferenceIndex { sheet, row, column });
+        }
+    }
+
     /// Removes the content of every cell in the range but leaves the style.
     ///
     /// See also:
