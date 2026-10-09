@@ -12,8 +12,7 @@ fn random() -> f64 {
 
 #[cfg(target_arch = "wasm32")]
 fn random() -> f64 {
-    use js_sys::Math;
-    Math::random()
+    crate::wasm_host::random()
 }
 
 impl<'a> Model<'a> {

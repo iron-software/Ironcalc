@@ -58,13 +58,12 @@ pub fn get_milliseconds_since_epoch() -> i64 {
 /// Number of milliseconds since January 1, 1970
 /// Used by time and date functions. It takes the value from the environment:
 /// * The Operative System
-/// * The JavaScript environment
+/// * The embedding host, through `wasm_host::set_milliseconds_since_epoch`
 /// * Or mocked for tests
 #[cfg(not(any(test, feature = "mock_time")))]
 #[cfg(target_arch = "wasm32")]
 pub fn get_milliseconds_since_epoch() -> i64 {
-    use js_sys::Date;
-    Date::now() as i64
+    crate::wasm_host::milliseconds_since_epoch()
 }
 
 // The structure of a cell.
