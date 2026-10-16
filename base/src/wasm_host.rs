@@ -9,8 +9,9 @@
 //!   `"Local"` uses it, so `NOW()` and `TODAY()` match the host's local time.
 //! * [`set_random_seed`]: the seed of `RAND()` and `RANDBETWEEN()`.
 //!
-//! Native builds do not use this module. They read the system clock, the system time-zone database,
-//! and `rand`, as upstream IronCalc does.
+//! Native builds use this module only with the `host` feature, so an embedder can test natively the
+//! code that it runs on wasm32. Without the feature they read the system clock, the system time-zone
+//! database, and `rand`, as upstream IronCalc does.
 
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 
@@ -37,6 +38,8 @@ pub fn set_random_seed(seed: u64) {
     RANDOM_STATE.store(non_zero_seed(seed), Ordering::Relaxed);
 }
 
+// Tests and the `mock_time` feature use the mock clock instead.
+#[cfg_attr(any(test, feature = "mock_time"), allow(dead_code))]
 pub(crate) fn milliseconds_since_epoch() -> i64 {
     CLOCK_MS.load(Ordering::Relaxed)
 }
@@ -47,9 +50,13 @@ pub(crate) fn local_utc_offset_minutes() -> i32 {
 
 /// Returns the next random number in `[0, 1)`.
 pub(crate) fn random() -> f64 {
-    let (next, value) = xorshift64_star(RANDOM_STATE.load(Ordering::Relaxed));
-    RANDOM_STATE.store(next, Ordering::Relaxed);
-    value
+    // One atomic step, so two callers never read the same state.
+    let previous = RANDOM_STATE
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |state| {
+            Some(xorshift64_star(state).0)
+        })
+        .unwrap_or_else(|state| state);
+    xorshift64_star(previous).1
 }
 
 fn non_zero_seed(seed: u64) -> u64 {

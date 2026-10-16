@@ -45,7 +45,7 @@ pub use crate::mock_time::get_milliseconds_since_epoch;
 /// * The JavaScript environment
 /// * Or mocked for tests
 #[cfg(not(any(test, feature = "mock_time")))]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", feature = "host")))]
 #[allow(clippy::expect_used)]
 pub fn get_milliseconds_since_epoch() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -61,7 +61,7 @@ pub fn get_milliseconds_since_epoch() -> i64 {
 /// * The embedding host, through `wasm_host::set_milliseconds_since_epoch`
 /// * Or mocked for tests
 #[cfg(not(any(test, feature = "mock_time")))]
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "host"))]
 pub fn get_milliseconds_since_epoch() -> i64 {
     crate::wasm_host::milliseconds_since_epoch()
 }
@@ -3087,15 +3087,25 @@ impl<'a> Model<'a> {
     ///
     /// Use [`Model::evaluate()`] for the whole workbook, for a change that can move a dynamic-array
     /// spill area, and to refresh conditional formatting: this method does not do either.
-    pub fn evaluate_cells(&mut self, cells: &[(u32, i32, i32)]) {
+    ///
+    /// Returns an error, and changes nothing, when a sheet index is not a sheet of the workbook.
+    pub fn evaluate_cells(&mut self, cells: &[(u32, i32, i32)]) -> Result<(), String> {
+        let sheet_count = self.workbook.worksheets.len();
+        if let Some(&(sheet, _, _)) = cells.iter().find(|c| c.0 as usize >= sheet_count) {
+            return Err(format!("Invalid sheet index: {sheet}"));
+        }
         self.clear_variable_stack();
         self.clear_lambdas();
-        for key in cells {
-            self.cells.remove(key);
+        for &(sheet, row, column) in cells {
+            self.cells.remove(&(sheet, row, column));
+            // Each evaluation records the support of a cell again, so drop the old record.
+            self.support
+                .remove(&CellReferenceIndex { sheet, row, column });
         }
         for &(sheet, row, column) in cells {
             self.evaluate_cell(CellReferenceIndex { sheet, row, column });
         }
+        Ok(())
     }
 
     /// Removes the content of every cell in the range but leaves the style.

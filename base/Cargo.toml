@@ -14,6 +14,9 @@ readme = "README.md"
 # Replaces the system clock with the mock in `mock_time.rs` so dependent
 # crates can test volatile functions (NOW, TODAY, ...) deterministically.
 mock_time = []
+# IronXL: use the host-supplied clock, local UTC offset, random seed, and fixed time zones of
+# `wasm_host` on every target, so a native embedder tests the same code that runs on wasm32.
+host = []
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

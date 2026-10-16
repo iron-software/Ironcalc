@@ -37,6 +37,8 @@ fn now_basic_utc() {
     assert_eq!(model._get_text("A2"), *"3/20/2023, 1:44 PM");
 }
 
+// IronXL: named time zones need the system time-zone database, which the `host` feature replaces.
+#[cfg(not(feature = "host"))]
 #[test]
 fn now_basic_europe_berlin() {
     mock_time::set_mock_time(TIMESTAMP_2023);
@@ -50,6 +52,8 @@ fn now_basic_europe_berlin() {
     assert_eq!(model._get_text("A2"), *"3/20/2023, 2:44 PM");
 }
 
+// IronXL: named time zones need the system time-zone database, which the `host` feature replaces.
+#[cfg(not(feature = "host"))]
 #[test]
 fn today_with_timezone() {
     mock_time::set_mock_time(TIMESTAMP_2023);
