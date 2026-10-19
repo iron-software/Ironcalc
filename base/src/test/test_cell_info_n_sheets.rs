@@ -34,6 +34,8 @@ fn arguments() {
     assert_eq!(model._get_text("A9"), *"#N/IMPL!");
 }
 
+// IronXL: named time zones need the system time-zone database, which the `host` feature replaces.
+#[cfg(not(feature = "host"))]
 #[test]
 fn info_timezone() {
     let mut model = new_empty_model();
@@ -50,6 +52,8 @@ fn info_timezone() {
     assert_eq!(model._get_text("A1"), *"America/Panama");
 }
 
+// IronXL: named time zones need the system time-zone database, which the `host` feature replaces.
+#[cfg(not(feature = "host"))]
 #[test]
 fn info_timezones() {
     let mut model = new_empty_model();

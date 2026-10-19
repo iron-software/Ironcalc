@@ -42,6 +42,11 @@ pub mod themes;
 pub mod types;
 pub mod worksheet;
 
+/// Host-supplied clock, local UTC offset, and random seed on wasm32, and on any target with the
+/// `host` feature (IronXL).
+#[cfg(any(target_arch = "wasm32", feature = "host", test))]
+pub mod wasm_host;
+
 pub use crate::constants::COLUMN_WIDTH_FACTOR;
 pub use crate::constants::ROW_HEIGHT_FACTOR;
 

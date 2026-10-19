@@ -538,7 +538,6 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "csv",
- "js-sys",
  "rand",
  "regex",
  "regex-lite",
@@ -546,7 +545,6 @@ dependencies = [
  "serde",
  "serde_json",
  "statrs",
- "wasm-bindgen",
 ]
 
 [[package]]

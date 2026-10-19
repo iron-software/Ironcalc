@@ -2,9 +2,9 @@ name: Build and Test
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "ironxl"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "ironxl"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,6 +39,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Rust Tests
         run: make test-rust
+      # IronXL: the host-supplied clock, offset, seed, and fixed time zones on a native target.
+      - name: Rust Tests (host feature)
+        run: cargo test -p ironcalc_base --features host
   test-js:
     runs-on: ubuntu-latest
     steps:

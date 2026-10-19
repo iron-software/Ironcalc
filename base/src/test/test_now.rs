@@ -5,6 +5,8 @@ use crate::{mock_time, test::util::new_empty_model};
 // 14:44 20 Mar 2023 Berlin
 const TIMESTAMP_2023: i64 = 1679319865208;
 
+// IronXL: named time zones need the system time-zone database, which the `host` feature replaces.
+#[cfg(not(feature = "host"))]
 #[test]
 fn arguments() {
     mock_time::set_mock_time(TIMESTAMP_2023);

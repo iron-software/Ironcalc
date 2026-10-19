@@ -5,15 +5,14 @@ use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", feature = "host")))]
 fn random() -> f64 {
     rand::random()
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "host"))]
 fn random() -> f64 {
-    use js_sys::Math;
-    Math::random()
+    crate::wasm_host::random()
 }
 
 impl<'a> Model<'a> {

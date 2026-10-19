@@ -14,11 +14,13 @@ readme = "README.md"
 # Replaces the system clock with the mock in `mock_time.rs` so dependent
 # crates can test volatile functions (NOW, TODAY, ...) deterministically.
 mock_time = []
+# IronXL: use the host-supplied clock, local UTC offset, random seed, and fixed time zones of
+# `wasm_host` on every target, so a native embedder tests the same code that runs on wasm32.
+host = []
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 ryu = "1.0"
-chrono = "0.4"
 bitcode = "0.6.8"
 csv = "1.3.0"
 statrs = { version = "0.18.0", default-features = false, features = [] }
@@ -26,12 +28,15 @@ statrs = { version = "0.18.0", default-features = false, features = [] }
 [dev-dependencies]
 serde_json = "1.0"
 
+# IronXL: on wasm32 the engine has no JavaScript glue (no js-sys, no wasm-bindgen) and chrono has no
+# clock or time-zone features. The host supplies the clock, the local UTC offset, and the random seed
+# through `wasm_host`.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = { version = "0.3.69" }
-wasm-bindgen = { version = "0.2" }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 regex-lite = { version = "0.1.6" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+chrono = "0.4"
 rand = "0.8.5"
 chrono-tz = "0.10"
 regex = "1.0"
