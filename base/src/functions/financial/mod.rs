@@ -8,7 +8,7 @@ use crate::{
         token::Error,
         types::CellReferenceIndex,
     },
-    formatter::dates::from_excel_date,
+    formatter::dates::{from_excel_date, DateSystem},
     model::Model,
 };
 
@@ -22,9 +22,13 @@ use financial_util::{compute_irr, compute_npv, compute_rate, compute_xirr, compu
 // See:
 // https://github.com/apache/openoffice/blob/c014b5f2b55cff8d4b0c952d5c16d62ecde09ca1/main/scaddins/source/analysis/financial.cxx
 
-fn is_less_than_one_year(start_date: i64, end_date: i64) -> Result<bool, String> {
-    let end = from_excel_date(end_date)?;
-    let start = from_excel_date(start_date)?;
+fn is_less_than_one_year(
+    start_date: i64,
+    end_date: i64,
+    date_system: DateSystem,
+) -> Result<bool, String> {
+    let end = from_excel_date(end_date, date_system)?;
+    let start = from_excel_date(start_date, date_system)?;
     if end_date - start_date < 365 {
         return Ok(true);
     }
@@ -1412,10 +1416,13 @@ impl<'a> Model<'a> {
             Ok(f) => f,
             Err(s) => return s,
         };
-        let less_than_one_year = match is_less_than_one_year(settlement as i64, maturity as i64) {
-            Ok(f) => f,
-            Err(_) => return CalcResult::new_error(Error::NUM, cell, "Invalid date".to_string()),
-        };
+        let less_than_one_year =
+            match is_less_than_one_year(settlement as i64, maturity as i64, self.date_system) {
+                Ok(f) => f,
+                Err(_) => {
+                    return CalcResult::new_error(Error::NUM, cell, "Invalid date".to_string())
+                }
+            };
         if settlement > maturity {
             return CalcResult::new_error(
                 Error::NUM,
@@ -1477,10 +1484,13 @@ impl<'a> Model<'a> {
             Ok(f) => f,
             Err(s) => return s,
         };
-        let less_than_one_year = match is_less_than_one_year(settlement as i64, maturity as i64) {
-            Ok(f) => f,
-            Err(_) => return CalcResult::new_error(Error::NUM, cell, "Invalid date".to_string()),
-        };
+        let less_than_one_year =
+            match is_less_than_one_year(settlement as i64, maturity as i64, self.date_system) {
+                Ok(f) => f,
+                Err(_) => {
+                    return CalcResult::new_error(Error::NUM, cell, "Invalid date".to_string())
+                }
+            };
         if settlement > maturity {
             return CalcResult::new_error(
                 Error::NUM,
@@ -1528,10 +1538,13 @@ impl<'a> Model<'a> {
             Ok(f) => f,
             Err(s) => return s,
         };
-        let less_than_one_year = match is_less_than_one_year(settlement as i64, maturity as i64) {
-            Ok(f) => f,
-            Err(_) => return CalcResult::new_error(Error::NUM, cell, "Invalid date".to_string()),
-        };
+        let less_than_one_year =
+            match is_less_than_one_year(settlement as i64, maturity as i64, self.date_system) {
+                Ok(f) => f,
+                Err(_) => {
+                    return CalcResult::new_error(Error::NUM, cell, "Invalid date".to_string())
+                }
+            };
         if settlement > maturity {
             return CalcResult::new_error(
                 Error::NUM,

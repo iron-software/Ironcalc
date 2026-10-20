@@ -4,7 +4,7 @@ use crate::{
     calc_result::CalcResult,
     constants::EXCEL_DATE_BASE,
     expressions::{parser::Node, token::Error, types::CellReferenceIndex},
-    formatter::dates::from_excel_date,
+    formatter::dates::{from_excel_date, DateSystem},
     model::Model,
 };
 
@@ -127,7 +127,7 @@ fn change_month(date: NaiveDate, num_months: i32, return_last: bool) -> Result<N
 // end-of-month rule anchored on the maturity date.
 fn find_pcd_ncd(settlement: i64, maturity: i64, frequency: u32) -> Result<(i64, i64), String> {
     let months_per = (12 / frequency) as i32;
-    let mat = from_excel_date(maturity)?;
+    let mat = from_excel_date(maturity, DateSystem::Date1900)?;
     let return_last = is_last_day_of_month(mat);
 
     let mut front = mat;
@@ -152,8 +152,11 @@ fn next_coupon_date(settlement: i64, maturity: i64, frequency: u32) -> Result<i6
 // Number of coupon payments strictly after settlement up to and including maturity.
 fn coupon_count(settlement: i64, maturity: i64, frequency: u32) -> Result<u32, String> {
     let months_per = 12 / frequency as i32;
-    let next = from_excel_date(next_coupon_date(settlement, maturity, frequency)?)?;
-    let mat = from_excel_date(maturity)?;
+    let next = from_excel_date(
+        next_coupon_date(settlement, maturity, frequency)?,
+        DateSystem::Date1900,
+    )?;
+    let mat = from_excel_date(maturity, DateSystem::Date1900)?;
 
     let next_months = next.year() * 12 + next.month() as i32;
     let mat_months = mat.year() * 12 + mat.month() as i32;
@@ -174,8 +177,14 @@ fn coupon_days_e(
     match basis {
         0 | 2 | 4 => Ok(360.0 / frequency as f64),
         1 => {
-            let prev = from_excel_date(prev_coupon_date(settlement, maturity, frequency)?)?;
-            let next = from_excel_date(next_coupon_date(settlement, maturity, frequency)?)?;
+            let prev = from_excel_date(
+                prev_coupon_date(settlement, maturity, frequency)?,
+                DateSystem::Date1900,
+            )?;
+            let next = from_excel_date(
+                next_coupon_date(settlement, maturity, frequency)?,
+                DateSystem::Date1900,
+            )?;
             Ok(actual_days(prev, next))
         }
         3 => Ok(365.0 / frequency as f64),
@@ -190,8 +199,11 @@ fn coupon_days_a(
     frequency: u32,
     basis: u32,
 ) -> Result<f64, String> {
-    let prev = from_excel_date(prev_coupon_date(settlement, maturity, frequency)?)?;
-    let set = from_excel_date(settlement)?;
+    let prev = from_excel_date(
+        prev_coupon_date(settlement, maturity, frequency)?,
+        DateSystem::Date1900,
+    )?;
+    let set = from_excel_date(settlement, DateSystem::Date1900)?;
     Ok(basis_days(prev, set, basis))
 }
 
@@ -398,8 +410,8 @@ fn coup_number(
     num_months: i32,
     is_whole_number: bool,
 ) -> Result<f64, String> {
-    let mat_d = from_excel_date(mat)?;
-    let settl_d = from_excel_date(settl)?;
+    let mat_d = from_excel_date(mat, DateSystem::Date1900)?;
+    let settl_d = from_excel_date(settl, DateSystem::Date1900)?;
 
     let coupons_temp = if is_whole_number { 0.0 } else { 1.0 };
     let end_of_month_temp = is_last_day_of_month(mat_d);
@@ -453,9 +465,9 @@ fn compute_oddfprice(
     let m = frequency as f64;
     let num_months = (12 / frequency) as i32;
 
-    let settlement_d = from_excel_date(settlement)?;
-    let issue_d = from_excel_date(issue)?;
-    let first_coupon_d = from_excel_date(first_coupon)?;
+    let settlement_d = from_excel_date(settlement, DateSystem::Date1900)?;
+    let issue_d = from_excel_date(issue, DateSystem::Date1900)?;
+    let first_coupon_d = from_excel_date(first_coupon, DateSystem::Date1900)?;
 
     // E: length of the quasi-coupon period that ends on the first coupon.
     let e = coupon_days_e(settlement, first_coupon, frequency, basis)?;
@@ -505,10 +517,16 @@ fn compute_oddfprice(
         }
 
         let dsc = if basis == 2 || basis == 3 {
-            let ncd = from_excel_date(next_coupon_date(settlement, first_coupon, frequency)?)?;
+            let ncd = from_excel_date(
+                next_coupon_date(settlement, first_coupon, frequency)?,
+                DateSystem::Date1900,
+            )?;
             days_between_not_neg(settlement_d, ncd, basis)
         } else {
-            let pcd = from_excel_date(prev_coupon_date(settlement, first_coupon, frequency)?)?;
+            let pcd = from_excel_date(
+                prev_coupon_date(settlement, first_coupon, frequency)?,
+                DateSystem::Date1900,
+            )?;
             e - basis_days(pcd, settlement_d, basis)
         };
 
@@ -549,9 +567,9 @@ fn odd_l_func(
     let m = frequency as f64;
     let num_months = (12 / frequency) as i32;
 
-    let settlement_d = from_excel_date(settlement)?;
-    let maturity_d = from_excel_date(maturity)?;
-    let last_interest_d = from_excel_date(last_interest)?;
+    let settlement_d = from_excel_date(settlement, DateSystem::Date1900)?;
+    let maturity_d = from_excel_date(maturity, DateSystem::Date1900)?;
+    let last_interest_d = from_excel_date(last_interest, DateSystem::Date1900)?;
 
     let nc = coupon_count(last_interest, maturity, frequency)? as i64;
 
@@ -697,11 +715,11 @@ fn parse_coupon_args(
     }
     let settlement = {
         let f = model.get_number_no_bools(&args[0], cell)?;
-        f.floor() as i64
+        model.date_system.serial_to_1900(f.floor() as i64)
     };
     let maturity = {
         let f = model.get_number_no_bools(&args[1], cell)?;
-        f.floor() as i64
+        model.date_system.serial_to_1900(f.floor() as i64)
     };
     let frequency = {
         let f = model.get_number_no_bools(&args[2], cell)?;
@@ -731,6 +749,10 @@ fn parse_coupon_args(
 // Model implementations
 // ============================================================
 
+// IronXL: the bond helpers above work on serial numbers of the 1900 date system. The Model
+// functions convert date arguments with `DateSystem::serial_to_1900` and date results with
+// `DateSystem::serial_from_1900`.
+
 impl<'a> Model<'a> {
     // DURATION(settlement, maturity, coupon, yld, frequency, [basis])
     pub(crate) fn fn_duration(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
@@ -739,11 +761,11 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let settlement = match self.get_number_no_bools(&args[0], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let maturity = match self.get_number_no_bools(&args[1], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let rate = match self.get_number_no_bools(&args[2], cell) {
@@ -855,11 +877,11 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let settlement = match self.get_number_no_bools(&args[0], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let maturity = match self.get_number_no_bools(&args[1], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let rate = match self.get_number_no_bools(&args[2], cell) {
@@ -923,11 +945,11 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let settlement = match self.get_number_no_bools(&args[0], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let maturity = match self.get_number_no_bools(&args[1], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let rate = match self.get_number_no_bools(&args[2], cell) {
@@ -990,19 +1012,19 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let settlement = match self.get_number_no_bools(&args[0], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let maturity = match self.get_number_no_bools(&args[1], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let issue = match self.get_number_no_bools(&args[2], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let first_coupon = match self.get_number_no_bools(&args[3], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let rate = match self.get_number_no_bools(&args[4], cell) {
@@ -1070,19 +1092,19 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let settlement = match self.get_number_no_bools(&args[0], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let maturity = match self.get_number_no_bools(&args[1], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let issue = match self.get_number_no_bools(&args[2], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let first_coupon = match self.get_number_no_bools(&args[3], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let rate = match self.get_number_no_bools(&args[4], cell) {
@@ -1155,15 +1177,15 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let settlement = match self.get_number_no_bools(&args[0], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let maturity = match self.get_number_no_bools(&args[1], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let last_interest = match self.get_number_no_bools(&args[2], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let rate = match self.get_number_no_bools(&args[3], cell) {
@@ -1230,15 +1252,15 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let settlement = match self.get_number_no_bools(&args[0], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let maturity = match self.get_number_no_bools(&args[1], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let last_interest = match self.get_number_no_bools(&args[2], cell) {
-            Ok(f) => f.floor() as i64,
+            Ok(f) => self.date_system.serial_to_1900(f.floor() as i64),
             Err(e) => return e,
         };
         let rate = match self.get_number_no_bools(&args[3], cell) {
@@ -1336,11 +1358,11 @@ impl<'a> Model<'a> {
             Ok(v) => v,
             Err(e) => return map_date_err(e, cell),
         };
-        let set_date = match from_excel_date(settlement) {
+        let set_date = match from_excel_date(settlement, DateSystem::Date1900) {
             Ok(d) => d,
             Err(e) => return map_date_err(e, cell),
         };
-        let next_date = match from_excel_date(next) {
+        let next_date = match from_excel_date(next, DateSystem::Date1900) {
             Ok(d) => d,
             Err(e) => return map_date_err(e, cell),
         };
@@ -1353,7 +1375,7 @@ impl<'a> Model<'a> {
                 Ok(v) => v,
                 Err(e) => return map_date_err(e, cell),
             };
-            let prev_date = match from_excel_date(prev) {
+            let prev_date = match from_excel_date(prev, DateSystem::Date1900) {
                 Ok(d) => d,
                 Err(e) => return map_date_err(e, cell),
             };
@@ -1372,7 +1394,7 @@ impl<'a> Model<'a> {
             Err(e) => return e,
         };
         match next_coupon_date(settlement, maturity, frequency) {
-            Ok(serial) => CalcResult::Number(serial as f64),
+            Ok(serial) => CalcResult::Number(self.date_system.serial_from_1900(serial as f64)),
             Err(e) => map_date_err(e, cell),
         }
     }
@@ -1398,7 +1420,7 @@ impl<'a> Model<'a> {
             Err(e) => return e,
         };
         match prev_coupon_date(settlement, maturity, frequency) {
-            Ok(serial) => CalcResult::Number(serial as f64),
+            Ok(serial) => CalcResult::Number(self.date_system.serial_from_1900(serial as f64)),
             Err(e) => map_date_err(e, cell),
         }
     }

@@ -3,7 +3,7 @@ use chrono::Datelike;
 use crate::{locale::Locale, number_format::to_precision};
 
 use super::{
-    dates::{date_to_serial_number, from_excel_date},
+    dates::{date_to_serial_number, from_excel_date, DateSystem},
     parser::{ParsePart, Parser, TextToken},
 };
 
@@ -57,6 +57,17 @@ fn use_group_separator(use_thousands: bool, digit_index: i32, group_sizes: &str)
 }
 
 pub fn format_number(value_original: f64, format: &str, locale: &Locale) -> Formatted {
+    format_number_with_date_system(value_original, format, locale, DateSystem::Date1900)
+}
+
+/// IronXL: formats a number like `format_number`. A date format reads the value as a serial
+/// number of `date_system`.
+pub fn format_number_with_date_system(
+    value_original: f64,
+    format: &str,
+    locale: &Locale,
+    date_system: DateSystem,
+) -> Formatted {
     let mut parser = Parser::new(format);
     parser.parse();
     let parts = parser.parts;
@@ -171,7 +182,7 @@ pub fn format_number(value_original: f64, format: &str, locale: &Locale) -> Form
             let hours = (time_fract * 24.0).floor();
             let minutes = ((time_fract * 24.0 - hours) * 60.0).floor();
             let seconds = ((((time_fract * 24.0 - hours) * 60.0) - minutes) * 60.0).round();
-            let date = from_excel_date(value as i64).ok();
+            let date = from_excel_date(value as i64, date_system).ok();
             for token in tokens {
                 match token {
                     TextToken::Literal(c) => {
@@ -745,7 +756,11 @@ fn parse_year(year_str: &str) -> Result<(i32, String), String> {
 // NOTE 1: The separator has to be the same
 // NOTE 2: In some engines "2/3" is implemented ad "2/March of the present year"
 // NOTE 3: I did not implement the "short date"
-pub(crate) fn parse_date(value: &str, locale: &Locale) -> Result<(i32, String), String> {
+pub(crate) fn parse_date(
+    value: &str,
+    locale: &Locale,
+    date_system: DateSystem,
+) -> Result<(i32, String), String> {
     let separator = if value.contains('/') {
         '/'
     } else if value.contains('-') {
@@ -786,7 +801,7 @@ pub(crate) fn parse_date(value: &str, locale: &Locale) -> Result<(i32, String), 
     let (day, day_format) = parse_day(day_str)?;
     let (month, month_format) = parse_month(month_str, locale)?;
     let (year, year_format) = parse_year(year_str)?;
-    let serial_number = match date_to_serial_number(day, month, year) {
+    let serial_number = match date_to_serial_number(day, month, year, date_system) {
         Ok(n) => n,
         Err(_) => return Err("Not a valid date".to_string()),
     };
@@ -813,10 +828,22 @@ pub(crate) fn parse_date(value: &str, locale: &Locale) -> Result<(i32, String), 
 /// "$ 123,345.678" => (123345.678, "$#,##0.00")
 /// "30.34%" => (0.3034, "0.00%")
 /// 100€ => (100, "100€")
+#[cfg(test)]
 pub(crate) fn parse_formatted_number(
     original: &str,
     currencies: &[&str],
     locale: &Locale,
+) -> Result<(f64, Option<String>), String> {
+    parse_formatted_number_with_date_system(original, currencies, locale, DateSystem::Date1900)
+}
+
+/// IronXL: parses a number like `parse_formatted_number`. A date gives a serial number of
+/// `date_system`.
+pub(crate) fn parse_formatted_number_with_date_system(
+    original: &str,
+    currencies: &[&str],
+    locale: &Locale,
+    date_system: DateSystem,
 ) -> Result<(f64, Option<String>), String> {
     let value = original.trim();
     let scientific_format = "0.00E+00";
@@ -875,7 +902,7 @@ pub(crate) fn parse_formatted_number(
     }
 
     // check if it is a date. NOTE: we don't trim the original here
-    if let Ok((serial_number, format)) = parse_date(original, locale) {
+    if let Ok((serial_number, format)) = parse_date(original, locale, date_system) {
         return Ok((serial_number as f64, Some(format)));
     }
 

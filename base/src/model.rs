@@ -24,7 +24,9 @@ use crate::{
         utils::{self, is_valid_column_number, is_valid_identifier, is_valid_row},
     },
     formatter::{
-        format::{format_number, parse_formatted_number},
+        format::{
+            format_number, format_number_with_date_system, parse_formatted_number_with_date_system,
+        },
         lexer::is_likely_date_number_format,
     },
     implicit_intersection::implicit_intersection,
@@ -34,6 +36,7 @@ use crate::{
     utils as common,
 };
 
+use crate::formatter::dates::DateSystem;
 use crate::{cf_types::CfCellResult, tz::Tz};
 
 #[cfg(any(test, feature = "mock_time"))]
@@ -222,6 +225,8 @@ pub struct Model<'a> {
     /// Evaluated CF results per cell, keyed by (sheet_index, row, column).
     /// Rebuilt from scratch on every call to evaluate_conditional_formatting().
     pub(crate) cf_cache: HashMap<(u32, i32, i32), Vec<CfCellResult>>,
+    /// IronXL: the date system of date functions and the number formatter.
+    pub(crate) date_system: DateSystem,
 }
 
 // FIXME: Maybe this should be the same as CellReference
@@ -1718,6 +1723,7 @@ impl<'a> Model<'a> {
             spill_cells: Vec::new(),
             support: HashMap::new(),
             cf_cache: HashMap::new(),
+            date_system: DateSystem::default(),
         };
 
         model.parse_formulas();
@@ -2419,9 +2425,12 @@ impl<'a> Model<'a> {
                 }
 
                 //  We try to parse as number
-                if let Ok((v, number_format)) =
-                    parse_formatted_number(&value, &currencies, self.locale)
-                {
+                if let Ok((v, number_format)) = parse_formatted_number_with_date_system(
+                    &value,
+                    &currencies,
+                    self.locale,
+                    self.date_system,
+                ) {
                     if let Some(num_fmt) = number_format {
                         // Should not apply the format in the following cases:
                         // - we assign a date to already date-formatted cell
@@ -2819,7 +2828,13 @@ impl<'a> Model<'a> {
                 let format = self.get_style_for_cell(sheet_index, row, column)?.num_fmt;
                 let formatted_value =
                     cell.formatted_value(&self.workbook.shared_strings, self.language, |value| {
-                        format_number(value, &format, self.locale).text
+                        format_number_with_date_system(
+                            value,
+                            &format,
+                            self.locale,
+                            self.date_system,
+                        )
+                        .text
                     });
                 Ok(formatted_value)
             }
@@ -2882,7 +2897,12 @@ impl<'a> Model<'a> {
                     if is_likely_date_number_format(&style.num_fmt) {
                         let value = cell.value(&self.workbook.shared_strings, self.language);
                         if let CellValue::Number(n) = value {
-                            let formatted = format_number(n, &style.num_fmt, self.locale);
+                            let formatted = format_number_with_date_system(
+                                n,
+                                &style.num_fmt,
+                                self.locale,
+                                self.date_system,
+                            );
                             if formatted.error.is_none() {
                                 return Ok(formatted.text);
                             }
@@ -3866,6 +3886,26 @@ impl<'a> Model<'a> {
     /// Gets the timezone of the model
     pub fn get_timezone(&self) -> String {
         self.workbook.settings.tz.clone()
+    }
+
+    /// IronXL: sets the 1904 date system. When `value` is true, every date function and the
+    /// number formatter use 1 January 1904 as serial 0. The default is the 1900 date system.
+    /// The model evaluates again when the setting changes.
+    pub fn set_date_1904(&mut self, value: bool) {
+        let date_system = if value {
+            DateSystem::Date1904
+        } else {
+            DateSystem::Date1900
+        };
+        if self.date_system != date_system {
+            self.date_system = date_system;
+            self.evaluate();
+        }
+    }
+
+    /// IronXL: returns true when the model uses the 1904 date system.
+    pub fn is_date_1904(&self) -> bool {
+        self.date_system == DateSystem::Date1904
     }
 
     /// Gets the locale of the model

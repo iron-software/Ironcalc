@@ -2,6 +2,7 @@ use chrono::DateTime;
 
 use std::collections::HashMap;
 
+use crate::formatter::dates::DateSystem;
 use crate::{
     calc_result::Range,
     constants::{DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH},
@@ -695,6 +696,7 @@ impl<'a> Model<'a> {
             spill_cells: Vec::new(),
             support: HashMap::new(),
             cf_cache: HashMap::new(),
+            date_system: DateSystem::default(),
         };
         model.parse_formulas();
         model.evaluate_conditional_formatting();

@@ -1,7 +1,7 @@
 use crate::{
     calc_result::CalcResult,
     expressions::{parser::Node, token::Error, types::CellReferenceIndex},
-    formatter::format::parse_formatted_number,
+    formatter::format::parse_formatted_number_with_date_system,
     Model,
 };
 
@@ -765,7 +765,8 @@ impl<'a> Model<'a> {
             }
         }
 
-        let formatted_number = parse_formatted_number(&criteria, &[], self.locale);
+        let formatted_number =
+            parse_formatted_number_with_date_system(&criteria, &[], self.locale, self.date_system);
 
         match op {
             ">" | ">=" | "<" | "<=" => {
