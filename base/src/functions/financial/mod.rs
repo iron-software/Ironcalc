@@ -2,7 +2,8 @@ use chrono::Datelike;
 
 use crate::{
     calc_result::CalcResult,
-    constants::{LAST_COLUMN, LAST_ROW, MAXIMUM_DATE_SERIAL_NUMBER, MINIMUM_DATE_SERIAL_NUMBER},
+    constants::{LAST_COLUMN, LAST_ROW},
+    date_system::{maximum_date_serial_number, minimum_date_serial_number},
     expressions::{
         parser::{ArrayNode, Node},
         token::Error,
@@ -953,8 +954,8 @@ impl<'a> Model<'a> {
         }
         let first_date = dates[0];
         for date in &dates {
-            if *date < MINIMUM_DATE_SERIAL_NUMBER as f64
-                || *date > MAXIMUM_DATE_SERIAL_NUMBER as f64
+            if *date < minimum_date_serial_number() as f64
+                || *date > maximum_date_serial_number() as f64
             {
                 // Excel docs claim that if any number in dates is not a valid date,
                 // XNPV returns the #VALUE! error value, but it seems to return #VALUE!
@@ -1021,8 +1022,8 @@ impl<'a> Model<'a> {
         }
         let first_date = dates[0];
         for date in &dates {
-            if *date < MINIMUM_DATE_SERIAL_NUMBER as f64
-                || *date > MAXIMUM_DATE_SERIAL_NUMBER as f64
+            if *date < minimum_date_serial_number() as f64
+                || *date > maximum_date_serial_number() as f64
             {
                 return CalcResult::new_error(
                     Error::NUM,

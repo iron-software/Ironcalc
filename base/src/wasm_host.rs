@@ -15,7 +15,7 @@
 
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 
-use crate::constants::EXCEL_DATE_BASE;
+use crate::date_system::excel_date_base;
 
 static CLOCK_MS: AtomicI64 = AtomicI64::new(0);
 static LOCAL_OFFSET_MINUTES: AtomicI32 = AtomicI32::new(0);
@@ -85,7 +85,7 @@ pub(crate) fn excel_serial(ms: i64, offset_minutes: i32) -> Option<f64> {
         .div_euclid(1000)
         .checked_add(i64::from(offset_minutes) * 60)?;
     let dt = DateTime::from_timestamp(local_seconds, 0)?;
-    let days = dt.num_days_from_ce() - EXCEL_DATE_BASE;
+    let days = dt.num_days_from_ce() - excel_date_base();
     Some(f64::from(days) + f64::from(dt.num_seconds_from_midnight()) / 86400.0)
 }
 
@@ -97,6 +97,12 @@ mod tests {
     #[test]
     fn excel_serial_of_the_unix_epoch_is_25569() {
         assert_eq!(excel_serial(0, 0), Some(25569.0));
+    }
+
+    #[test]
+    fn excel_serial_uses_the_date_system_of_the_model() {
+        let _dates = crate::date_system::DateSystemScope::enter(true);
+        assert_eq!(excel_serial(0, 0), Some(25569.0 - 1462.0));
     }
 
     #[test]

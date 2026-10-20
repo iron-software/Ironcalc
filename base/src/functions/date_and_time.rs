@@ -24,11 +24,16 @@ fn last_day_of_feb(year: i32) -> u32 {
 // Maps a date serial number (date part only) to the Excel (year, month, day) it
 // represents, replicating Excel's fictional 29 February 1900 (the "1900
 // leap-year bug") so DAYS360 matches Excel for early-1900 serials. Returns
-// `None` when the serial is outside `0..=MAXIMUM_DATE_SERIAL_NUMBER`, which Excel
+// `None` when the serial is outside `0..=maximum_date_serial_number()`, which Excel
 // reports as `#NUM!`.
 fn excel_serial_to_ymd(serial: i64) -> Option<(i32, u32, u32)> {
-    if !(0..=MAXIMUM_DATE_SERIAL_NUMBER as i64).contains(&serial) {
+    if !(0..=maximum_date_serial_number() as i64).contains(&serial) {
         return None;
+    }
+    // IronXL: the 1904 system has no fictional leap day, and serial 0 is 1 January 1904.
+    if crate::date_system::is_date1904() {
+        let date = from_excel_date(serial).ok()?;
+        return Some((date.year(), date.month(), date.day()));
     }
     // Excel renders serial 0 as "0 January 1900"; DAYS360 reads it as day 0 of
     // January 1900 (not 31 December 1899), which is what makes it antisymmetric.
@@ -132,10 +137,21 @@ fn is_feb29_between_consecutive_years(start: chrono::NaiveDate, end: chrono::Nai
 // functions (DAY, MONTH, YEAR, HOUR, MINUTE, SECOND).
 // ---------------------------------------------------------------------------
 
-// Generate DAY / MONTH / YEAR helpers – simply convert the serial number to a
-// NaiveDate and return the requested component as a number.
+// The (year, month, day) of a date serial for DAY, MONTH, and YEAR (IronXL). In the
+// 1900 system Excel reads serial 0 as "0 January 1900"; every other serial reads
+// through `from_excel_date`, in the date system of the model.
+fn date_parts(serial: i64) -> Option<(i32, u32, u32)> {
+    if serial == 0 && !crate::date_system::is_date1904() {
+        return Some((1900, 1, 0));
+    }
+    let date = from_excel_date(serial).ok()?;
+    Some((date.year(), date.month(), date.day()))
+}
+
+// Generate DAY / MONTH / YEAR helpers – convert the serial number to the
+// (year, month, day) of `date_parts` and return the requested component as a number.
 macro_rules! date_part_fn {
-    ($name:ident, $method:ident) => {
+    ($name:ident, $part:tt) => {
         pub(crate) fn $name(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
             if args.len() != 1 {
                 return CalcResult::new_args_number_error(cell);
@@ -143,14 +159,10 @@ macro_rules! date_part_fn {
             // Convert the serial number to a NaiveDate and return the requested
             // component. Broadcasts element-wise over ranges/arrays. Uses the free
             // function from_excel_date to avoid borrowing self in the closure.
-            self.apply_number_unary(
-                &args[0],
-                cell,
-                |f| match from_excel_date(f.floor() as i64) {
-                    Ok(date) => Ok(date.$method() as f64),
-                    Err(_) => Err(Error::NUM),
-                },
-            )
+            self.apply_number_unary(&args[0], cell, |f| match date_parts(f.floor() as i64) {
+                Some(parts) => Ok(parts.$part as f64),
+                None => Err(Error::NUM),
+            })
         }
     };
 }
@@ -181,8 +193,8 @@ macro_rules! time_part_fn {
 }
 
 use crate::arithmetic::bcast_idx;
-use crate::constants::MAXIMUM_DATE_SERIAL_NUMBER;
-use crate::constants::MINIMUM_DATE_SERIAL_NUMBER;
+use crate::date_system::maximum_date_serial_number;
+use crate::date_system::minimum_date_serial_number;
 use crate::expressions::types::CellReferenceIndex;
 use crate::formatter::dates::date_to_serial_number;
 use crate::formatter::dates::permissive_date_to_serial_number;
@@ -190,7 +202,7 @@ use crate::formatter::dates::DATE_OUT_OF_RANGE_MESSAGE;
 use crate::number_format::to_precision;
 use crate::{
     calc_result::CalcResult,
-    constants::EXCEL_DATE_BASE,
+    date_system::excel_date_base,
     expressions::parser::{ArrayNode, Node},
     expressions::token::Error,
     formatter::dates::from_excel_date,
@@ -620,9 +632,9 @@ impl<'a> Model<'a> {
     // -----------------------------------------------------------------------
     // Auto-generated DATE part helpers (DAY / MONTH / YEAR)
     // -----------------------------------------------------------------------
-    date_part_fn!(fn_day, day);
-    date_part_fn!(fn_month, month);
-    date_part_fn!(fn_year, year);
+    date_part_fn!(fn_day, 2);
+    date_part_fn!(fn_month, 1);
+    date_part_fn!(fn_year, 0);
 
     pub(crate) fn fn_eomonth(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         let args_count = args.len();
@@ -647,7 +659,7 @@ impl<'a> Model<'a> {
             Ok(d) => d,
             Err(e) => return e,
         };
-        if serial_number > MAXIMUM_DATE_SERIAL_NUMBER as i64 {
+        if serial_number > maximum_date_serial_number() as i64 {
             return CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
@@ -827,8 +839,8 @@ impl<'a> Model<'a> {
             date - Months::new(months_abs)
         };
 
-        let serial_number = native_date.num_days_from_ce() - EXCEL_DATE_BASE;
-        if serial_number < MINIMUM_DATE_SERIAL_NUMBER {
+        let serial_number = native_date.num_days_from_ce() - excel_date_base();
+        if serial_number < minimum_date_serial_number() {
             return CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
@@ -1451,7 +1463,7 @@ impl<'a> Model<'a> {
         // Excel accepts any serial in 0..=MAXIMUM (a 0 serial is 1900-01-00) and
         // reports #NUM! otherwise. DAYS works directly on serials, so the dates
         // themselves are never materialised.
-        let range = 0..=MAXIMUM_DATE_SERIAL_NUMBER as i64;
+        let range = 0..=maximum_date_serial_number() as i64;
         if !range.contains(&start_serial) || !range.contains(&end_serial) {
             return CalcResult::new_error(
                 Error::NUM,
@@ -1638,7 +1650,7 @@ impl<'a> Model<'a> {
                 }
             }
         }
-        let serial = date.num_days_from_ce() - EXCEL_DATE_BASE;
+        let serial = date.num_days_from_ce() - excel_date_base();
         CalcResult::Number(serial as f64)
     }
 
@@ -1719,7 +1731,7 @@ impl<'a> Model<'a> {
                 }
             }
         }
-        let serial = date.num_days_from_ce() - EXCEL_DATE_BASE;
+        let serial = date.num_days_from_ce() - excel_date_base();
         CalcResult::Number(serial as f64)
     }
 

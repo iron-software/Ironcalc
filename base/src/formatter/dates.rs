@@ -4,36 +4,42 @@ use chrono::Duration;
 use chrono::Months;
 use chrono::NaiveDate;
 
-use crate::constants::EXCEL_DATE_BASE;
-use crate::constants::MAXIMUM_DATE_SERIAL_NUMBER;
-use crate::constants::MINIMUM_DATE_SERIAL_NUMBER;
+use crate::date_system::excel_date_base;
+use crate::date_system::is_date1904;
+use crate::date_system::maximum_date_serial_number;
+use crate::date_system::minimum_date_serial_number;
 
 pub const DATE_OUT_OF_RANGE_MESSAGE: &str = "Out of range parameters for date";
 
 #[inline]
 fn convert_to_serial_number(date: NaiveDate) -> i32 {
-    date.num_days_from_ce() - EXCEL_DATE_BASE
+    date.num_days_from_ce() - excel_date_base()
 }
 
 fn is_date_within_range(date: NaiveDate) -> bool {
-    convert_to_serial_number(date) >= MINIMUM_DATE_SERIAL_NUMBER
-        && convert_to_serial_number(date) <= MAXIMUM_DATE_SERIAL_NUMBER
+    convert_to_serial_number(date) >= minimum_date_serial_number()
+        && convert_to_serial_number(date) <= maximum_date_serial_number()
 }
 
 pub fn from_excel_date(days: i64) -> Result<NaiveDate, String> {
-    if days < MINIMUM_DATE_SERIAL_NUMBER as i64 {
+    if days < minimum_date_serial_number() as i64 {
         return Err(format!(
-            "Excel date must be greater than {MINIMUM_DATE_SERIAL_NUMBER}"
+            "Excel date must be greater than {}",
+            minimum_date_serial_number()
         ));
     };
-    if days > MAXIMUM_DATE_SERIAL_NUMBER as i64 {
+    if days > maximum_date_serial_number() as i64 {
         return Err(format!(
-            "Excel date must be less than {MAXIMUM_DATE_SERIAL_NUMBER}"
+            "Excel date must be less than {}",
+            maximum_date_serial_number()
         ));
     };
+    // IronXL: the base of the current date system. In the 1900 system it is two days before
+    // 1 January 1900, because of the fictional 29 February 1900.
     #[allow(clippy::expect_used)]
-    let dt = NaiveDate::from_ymd_opt(1900, 1, 1).expect("problem with chrono::NaiveDate");
-    Ok(dt + Duration::days(days - 2))
+    let base = NaiveDate::from_num_days_from_ce_opt(excel_date_base())
+        .expect("problem with chrono::NaiveDate");
+    Ok(base + Duration::days(days))
 }
 
 pub fn date_to_serial_number(day: u32, month: u32, year: i32) -> Result<i32, String> {
@@ -52,9 +58,9 @@ pub fn permissive_date_to_serial_number(day: i32, month: i32, year: i32) -> Resu
     // This function applies that same logic to dates. And does it in the most compatible way as
     // possible.
 
-    // Special case for the minimum date
-    if year == 1899 && month == 12 && day == 31 {
-        return Ok(MINIMUM_DATE_SERIAL_NUMBER);
+    // Special case for the minimum date of the 1900 system
+    if !is_date1904() && year == 1899 && month == 12 && day == 31 {
+        return Ok(minimum_date_serial_number());
     }
     let Some(mut date) = NaiveDate::from_ymd_opt(year, 1, 1) else {
         return Err(DATE_OUT_OF_RANGE_MESSAGE.to_string());
@@ -148,11 +154,11 @@ mod tests {
     fn test_max_and_min_dates() {
         assert_eq!(
             permissive_date_to_serial_number(31, 12, 9999),
-            Ok(MAXIMUM_DATE_SERIAL_NUMBER),
+            Ok(maximum_date_serial_number()),
         );
         assert_eq!(
             permissive_date_to_serial_number(31, 12, 1899),
-            Ok(MINIMUM_DATE_SERIAL_NUMBER),
+            Ok(minimum_date_serial_number()),
         );
     }
 }

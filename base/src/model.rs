@@ -34,6 +34,7 @@ use crate::{
     utils as common,
 };
 
+use crate::date_system::DateSystemScope;
 use crate::{cf_types::CfCellResult, tz::Tz};
 
 #[cfg(any(test, feature = "mock_time"))]
@@ -222,6 +223,8 @@ pub struct Model<'a> {
     /// Evaluated CF results per cell, keyed by (sheet_index, row, column).
     /// Rebuilt from scratch on every call to evaluate_conditional_formatting().
     pub(crate) cf_cache: HashMap<(u32, i32, i32), Vec<CfCellResult>>,
+    /// True when the model uses the 1904 date system (IronXL)
+    pub(crate) date1904: bool,
 }
 
 // FIXME: Maybe this should be the same as CellReference
@@ -1718,6 +1721,7 @@ impl<'a> Model<'a> {
             spill_cells: Vec::new(),
             support: HashMap::new(),
             cf_cache: HashMap::new(),
+            date1904: false,
         };
 
         model.parse_formulas();
@@ -2370,6 +2374,7 @@ impl<'a> Model<'a> {
         column: i32,
         value: String,
     ) -> Result<(), String> {
+        let _dates = DateSystemScope::enter(self.date1904);
         // first we make sure we can write in the cell and clear the spills.
         self.prepare_cell_for_user_input(sheet, row, column)?;
         if value.is_empty() {
@@ -2814,6 +2819,7 @@ impl<'a> Model<'a> {
         row: i32,
         column: i32,
     ) -> Result<String, String> {
+        let _dates = DateSystemScope::enter(self.date1904);
         match self.workbook.worksheet(sheet_index)?.cell(row, column) {
             Some(cell) => {
                 let format = self.get_style_for_cell(sheet_index, row, column)?.num_fmt;
@@ -2847,6 +2853,7 @@ impl<'a> Model<'a> {
         row: i32,
         column: i32,
     ) -> Result<String, String> {
+        let _dates = DateSystemScope::enter(self.date1904);
         let worksheet = self.workbook.worksheet(sheet)?;
         let cell = match worksheet.cell(row, column) {
             Some(c) => c,
@@ -3024,6 +3031,7 @@ impl<'a> Model<'a> {
     /// Phase 2 evaluates every remaining cell in natural order.  Because all spill areas have
     /// already been written, regular cells always read the correct spill values.
     pub fn evaluate(&mut self) {
+        let _dates = DateSystemScope::enter(self.date1904);
         self.collect_spill_cells();
 
         let n = self.spill_cells.len();
@@ -3090,6 +3098,7 @@ impl<'a> Model<'a> {
     ///
     /// Returns an error, and changes nothing, when a sheet index is not a sheet of the workbook.
     pub fn evaluate_cells(&mut self, cells: &[(u32, i32, i32)]) -> Result<(), String> {
+        let _dates = DateSystemScope::enter(self.date1904);
         let sheet_count = self.workbook.worksheets.len();
         if let Some(&(sheet, _, _)) = cells.iter().find(|c| c.0 as usize >= sheet_count) {
             return Err(format!("Invalid sheet index: {sheet}"));
@@ -3106,6 +3115,20 @@ impl<'a> Model<'a> {
             self.evaluate_cell(CellReferenceIndex { sheet, row, column });
         }
         Ok(())
+    }
+
+    /// Selects the date system of the model (IronXL): the 1904 system when `date1904` is true, else
+    /// the 1900 system. A workbook selects the 1904 system with `workbookPr/@date1904`.
+    ///
+    /// In the 1904 system, serial `0` is 1 January 1904 and there is no 29 February 1900. Every date
+    /// function, `NOW()`, `TODAY()`, and the number formatter use the date system of the model.
+    pub fn set_date1904(&mut self, date1904: bool) {
+        self.date1904 = date1904;
+    }
+
+    /// True when the model uses the 1904 date system (IronXL).
+    pub fn is_date1904(&self) -> bool {
+        self.date1904
     }
 
     /// Removes the content of every cell in the range but leaves the style.
