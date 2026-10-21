@@ -37,6 +37,7 @@ use crate::{
 };
 
 use crate::formatter::dates::DateSystem;
+use crate::precedents::PrecedentWalk;
 use crate::{cf_types::CfCellResult, tz::Tz};
 
 #[cfg(any(test, feature = "mock_time"))]
@@ -2710,7 +2711,7 @@ impl<'a> Model<'a> {
     }
 
     // Helper function that returns a defined name given the name and scope
-    fn get_parsed_defined_name(
+    pub(crate) fn get_parsed_defined_name(
         &self,
         name: &str,
         scope: Option<u32>,
@@ -3087,13 +3088,19 @@ impl<'a> Model<'a> {
 
         // Phase 2: evaluate everything else; spill cells are already Evaluated and skipped.
         // Fallback when max restarts is exceeded (circular spill dependency).
+        // IronXL: the precedents of a cell are evaluated first, so a long chain does not
+        // overflow the stack. See `crate::precedents`.
         let all_cells = self.get_all_cells();
+        let mut walk = PrecedentWalk::default();
         for cell in all_cells {
-            self.evaluate_cell(CellReferenceIndex {
-                sheet: cell.index,
-                row: cell.row,
-                column: cell.column,
-            });
+            self.evaluate_cell_after_precedents(
+                CellReferenceIndex {
+                    sheet: cell.index,
+                    row: cell.row,
+                    column: cell.column,
+                },
+                &mut walk,
+            );
         }
         self.evaluate_conditional_formatting();
     }
@@ -3122,8 +3129,12 @@ impl<'a> Model<'a> {
             self.support
                 .remove(&CellReferenceIndex { sheet, row, column });
         }
+        let mut walk = PrecedentWalk::default();
         for &(sheet, row, column) in cells {
-            self.evaluate_cell(CellReferenceIndex { sheet, row, column });
+            self.evaluate_cell_after_precedents(
+                CellReferenceIndex { sheet, row, column },
+                &mut walk,
+            );
         }
         Ok(())
     }
