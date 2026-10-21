@@ -683,7 +683,7 @@ impl<'a> Model<'a> {
             year += 1;
         }
         match date_to_serial_number(1, month, year, self.date_system) {
-            Ok(serial_number) => CalcResult::Number(serial_number as f64 - 1.0),
+            Ok(serial_number) => self.date_serial_result(serial_number - 1, cell),
             Err(message) => CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
@@ -840,7 +840,7 @@ impl<'a> Model<'a> {
                 message: "EDATE out of bounds".to_string(),
             };
         }
-        CalcResult::Number(serial_number as f64)
+        self.date_serial_result(serial_number, cell)
     }
 
     /// Walk a scalar / range / array node and invoke the provided closure with every
@@ -1004,6 +1004,24 @@ impl<'a> Model<'a> {
                 message: "Out of range parameters for date".to_string(),
             }),
         }
+    }
+
+    /// IronXL: returns a date serial number that a function computed, or #NUM! when the date is
+    /// out of range. A date after 9999-12-31 is out of range in both date systems. A date before
+    /// 1904-01-01 is out of range in the 1904 date system. The 1900 date system keeps the
+    /// upstream lower bound behaviour.
+    fn date_serial_result(&self, serial: i32, cell: CellReferenceIndex) -> CalcResult {
+        let date_system = self.date_system;
+        let too_small =
+            date_system == DateSystem::Date1904 && serial < date_system.minimum_serial();
+        if too_small || serial > date_system.maximum_serial() {
+            return CalcResult::Error {
+                error: Error::NUM,
+                origin: cell,
+                message: DATE_OUT_OF_RANGE_MESSAGE.to_string(),
+            };
+        }
+        CalcResult::Number(serial as f64)
     }
 
     fn weekend_mask(
@@ -1648,7 +1666,7 @@ impl<'a> Model<'a> {
             }
         }
         let serial = serial_from_date(date, self.date_system);
-        CalcResult::Number(serial as f64)
+        self.date_serial_result(serial, cell)
     }
 
     fn get_holiday_set(
@@ -1732,7 +1750,7 @@ impl<'a> Model<'a> {
             }
         }
         let serial = serial_from_date(date, self.date_system);
-        CalcResult::Number(serial as f64)
+        self.date_serial_result(serial, cell)
     }
 
     pub(crate) fn fn_yearfrac(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {

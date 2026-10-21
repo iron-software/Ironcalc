@@ -99,7 +99,15 @@ pub fn date_to_serial_number(
     date_system: DateSystem,
 ) -> Result<i32, String> {
     match NaiveDate::from_ymd_opt(year, month, day) {
-        Some(native_date) => Ok(serial_from_date(native_date, date_system)),
+        Some(native_date) => {
+            let serial = serial_from_date(native_date, date_system);
+            // IronXL: the 1904 date system has no date before 1904-01-01. The 1900 date system
+            // keeps the upstream behaviour.
+            if date_system == DateSystem::Date1904 && serial < date_system.minimum_serial() {
+                return Err(DATE_OUT_OF_RANGE_MESSAGE.to_string());
+            }
+            Ok(serial)
+        }
         None => Err(DATE_OUT_OF_RANGE_MESSAGE.to_string()),
     }
 }
@@ -228,8 +236,14 @@ mod tests {
         assert_eq!(date_to_serial_number(1, 1, 1904, date_1904), Ok(0));
         assert_eq!(date_to_serial_number(1, 1, 2026, date_1904), Ok(44_561));
         assert_eq!(
-            from_excel_date(0, date_1904),
-            Ok(NaiveDate::from_ymd_opt(1904, 1, 1).unwrap())
+            from_excel_date(0, date_1904).ok(),
+            NaiveDate::from_ymd_opt(1904, 1, 1)
+        );
+        assert!(NaiveDate::from_ymd_opt(1904, 1, 1).is_some());
+        assert!(date_to_serial_number(31, 12, 1903, date_1904).is_err());
+        assert_eq!(
+            date_to_serial_number(31, 12, 1898, DateSystem::Date1900),
+            Ok(-364)
         );
         assert!(from_excel_date(-1, date_1904).is_err());
         assert!(from_excel_date(date_1904.maximum_serial() as i64 + 1, date_1904).is_err());

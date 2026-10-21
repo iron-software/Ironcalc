@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used)]
+// A test helper fails the test with a clear message when a cell is not a number.
+#![allow(clippy::panic)]
 
 // IronXL: the 1904 date system setting of the model.
 
@@ -199,4 +201,157 @@ fn today_and_now_1904() {
     assert_eq!(today_1900 - today_1904, 1462.0);
     assert!((now_1900 - now_1904 - 1462.0).abs() < 1e-6);
     assert_eq!(model._get_text("A2"), "2023-03-20");
+}
+
+#[test]
+fn date_function_bounds_1904() {
+    let mut model = new_empty_model();
+    model.set_date_1904(true);
+    model._set("A1", "=EOMONTH(0,-1)");
+    model._set("A2", "=WORKDAY(0,-1)");
+    model._set("A3", "=WORKDAY.INTL(0,-1)");
+    model._set("A4", "=EDATE(0,-1)");
+    model._set("A5", "=EOMONTH(DATE(9999,12,31),1)");
+    model._set("A6", "=WORKDAY(DATE(9999,12,31),1)");
+    model._set("A7", "=WORKDAY.INTL(DATE(9999,12,31),1)");
+    model._set("A8", "=EDATE(DATE(9999,12,31),1)");
+    model._set("B1", "=EOMONTH(31,-1)");
+    model._set("B2", "=WORKDAY(3,-1)");
+    model._set("B3", "=WORKDAY.INTL(3,-1)");
+    model._set("B4", "=EDATE(31,-1)");
+    model._set("B5", "=EOMONTH(DATE(9999,12,1),0)");
+    model._set("B6", "=WORKDAY(DATE(9999,12,30),1)");
+    model._set("B7", "=WORKDAY.INTL(DATE(9999,12,30),1)");
+    model._set("B8", "=EDATE(DATE(9999,10,31),2)");
+    model._set("C1", "=DATE(9999,12,31)");
+    model.evaluate();
+
+    for cell in ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"] {
+        assert_eq!(model._get_text(cell), "#NUM!", "{cell}");
+    }
+    // 1904-01-01 is a Friday and serial 0.
+    assert_eq!(number(&model, "B1"), 30.0);
+    assert_eq!(number(&model, "B2"), 0.0);
+    assert_eq!(number(&model, "B3"), 0.0);
+    assert_eq!(number(&model, "B4"), 0.0);
+    assert_eq!(number(&model, "C1"), 2_957_003.0);
+    for cell in ["B5", "B6", "B7", "B8"] {
+        assert_eq!(number(&model, cell), 2_957_003.0, "{cell}");
+    }
+}
+
+#[test]
+fn date_function_bounds_1900() {
+    let mut model = new_empty_model();
+    model._set("A1", "=EOMONTH(1,-1)");
+    model._set("A2", "=WORKDAY(1,-1)");
+    model._set("A3", "=WORKDAY.INTL(1,-1)");
+    model._set("A4", "=EDATE(1,-1)");
+    model._set("A5", "=EOMONTH(DATE(9999,12,31),1)");
+    model._set("A6", "=WORKDAY(DATE(9999,12,31),1)");
+    model._set("A7", "=WORKDAY.INTL(DATE(9999,12,31),1)");
+    model._set("A8", "=EDATE(DATE(9999,12,31),1)");
+    model._set("B5", "=EOMONTH(DATE(9999,12,1),0)");
+    model._set("B6", "=WORKDAY(DATE(9999,12,30),1)");
+    model._set("B7", "=WORKDAY.INTL(DATE(9999,12,30),1)");
+    model._set("B8", "=EDATE(DATE(9999,10,31),2)");
+    model._set("C1", "=DATE(9999,12,31)");
+    model.evaluate();
+
+    // The 1900 date system keeps the upstream lower bound behaviour: serial 1 is 1899-12-31
+    // in the engine, and EOMONTH and WORKDAY can give a serial number below 1.
+    assert_eq!(number(&model, "A1"), -30.0);
+    assert_eq!(number(&model, "A2"), -1.0);
+    assert_eq!(number(&model, "A3"), -1.0);
+    assert_eq!(model._get_text("A4"), "#NUM!");
+    for cell in ["A5", "A6", "A7", "A8"] {
+        assert_eq!(model._get_text(cell), "#NUM!", "{cell}");
+    }
+    assert_eq!(number(&model, "C1"), 2_958_465.0);
+    for cell in ["B5", "B6", "B7", "B8"] {
+        assert_eq!(number(&model, cell), 2_958_465.0, "{cell}");
+    }
+}
+
+#[test]
+fn text_date_before_1904() {
+    let mut model = new_empty_model();
+    model.set_date_1904(true);
+    model._set("A1", "=DATEVALUE(\"1903-12-31\")");
+    model._set("A2", "=VALUE(\"1903-12-31\")");
+    model._set("A3", "1903-12-31");
+    model._set("A4", "=\"1903-12-31\"+0");
+    model._set("A5", "=COUNTIF(B1:B1,\"1903-12-31\")");
+    model._set("A6", "=COUNTIF(B1:B1,\"<=1903-12-31\")");
+    model._set("A10", "=COUNTIF(B2:B2,\"1903-12-31\")");
+    model._set("A7", "=DATEVALUE(\"1904-01-01\")");
+    model._set("A8", "=VALUE(\"1904-01-01\")");
+    model._set("A9", "1904-01-01");
+    model._set("B1", "-1");
+    model._set("B2", "=\"1903-12-31\"");
+    model.evaluate();
+
+    assert_eq!(model._get_text("A1"), "#VALUE!");
+    assert_eq!(model._get_text("A2"), "#VALUE!");
+    assert_eq!(
+        model.get_cell_value_by_ref("Sheet1!A3"),
+        Ok(CellValue::String("1903-12-31".to_string()))
+    );
+    assert_eq!(model._get_text("A4"), "#VALUE!");
+    // The criterion is not a date, so it does not match the number -1. It matches text.
+    assert_eq!(number(&model, "A5"), 0.0);
+    assert_eq!(number(&model, "A6"), 0.0);
+    assert_eq!(number(&model, "A10"), 1.0);
+    assert_eq!(number(&model, "A7"), 0.0);
+    assert_eq!(number(&model, "A8"), 0.0);
+    assert_eq!(number(&model, "A9"), 0.0);
+    assert_eq!(model._get_text("A9"), "1904-01-01");
+}
+
+#[test]
+fn text_date_leap_day_1900() {
+    let mut model = new_empty_model();
+    model._set("A1", "=DATEVALUE(\"1900-02-29\")");
+    model._set("A2", "=VALUE(\"1900-02-29\")");
+    model._set("A3", "1900-02-29");
+    model._set("A4", "=DATEVALUE(\"1903-12-31\")");
+    model._set("A5", "=COUNTIF(B1:B2,\"1903-12-31\")");
+    model._set("B1", "1461");
+    model._set("B2", "=\"1903-12-31\"");
+    model.evaluate();
+
+    assert_eq!(number(&model, "A1"), 60.0);
+    assert_eq!(number(&model, "A4"), 1461.0);
+    assert_eq!(number(&model, "A5"), 1.0);
+    // Upstream behaviour that the 1904 date system does not change: VALUE and typed input do
+    // not read the fictional date 1900-02-29.
+    assert_eq!(model._get_text("A2"), "#VALUE!");
+    assert_eq!(
+        model.get_cell_value_by_ref("Sheet1!A3"),
+        Ok(CellValue::String("1900-02-29".to_string()))
+    );
+}
+
+#[test]
+fn xnpv_and_xirr_date_zero() {
+    let mut model = new_empty_model();
+    model._set("A1", "=XNPV(0.1,{-100,110},{0,366})");
+    model._set("A2", "=XIRR({-100,110},{0,366})");
+    model._set("A3", "=XNPV(0.1,{-100,110},{-1,366})");
+    model._set("A4", "=XNPV(0.1,{-100,110},{0,2957004})");
+    model.evaluate();
+    // Serial 0 is not a date in the 1900 date system.
+    assert_eq!(model._get_text("A1"), "#NUM!");
+    assert_eq!(model._get_text("A2"), "#NUM!");
+
+    model.set_date_1904(true);
+    // 1904 is a leap year: serial 366 is 1905-01-01, 366 days after serial 0.
+    let xnpv = number(&model, "A1");
+    let expected = -100.0 + 110.0 / 1.1_f64.powf(366.0 / 365.0);
+    assert!((xnpv - expected).abs() < 1e-9, "{xnpv}");
+    let xirr = number(&model, "A2");
+    let expected = 1.1_f64.powf(365.0 / 366.0) - 1.0;
+    assert!((xirr - expected).abs() < 1e-6, "{xirr}");
+    assert_eq!(model._get_text("A3"), "#NUM!");
+    assert_eq!(model._get_text("A4"), "#NUM!");
 }
