@@ -26,9 +26,14 @@ fn last_day_of_feb(year: i32) -> u32 {
 // leap-year bug") so DAYS360 matches Excel for early-1900 serials. Returns
 // `None` when the serial is outside `0..=MAXIMUM_DATE_SERIAL_NUMBER`, which Excel
 // reports as `#NUM!`.
-fn excel_serial_to_ymd(serial: i64) -> Option<(i32, u32, u32)> {
-    if !(0..=MAXIMUM_DATE_SERIAL_NUMBER as i64).contains(&serial) {
+fn excel_serial_to_ymd(serial: i64, date_system: DateSystem) -> Option<(i32, u32, u32)> {
+    if !(0..=date_system.maximum_serial() as i64).contains(&serial) {
         return None;
+    }
+    // IronXL: the 1904 date system has no fictional leap day; serial 0 is 1904-01-01.
+    if date_system == DateSystem::Date1904 {
+        let date = from_excel_date(serial, date_system).ok()?;
+        return Some((date.year(), date.month(), date.day()));
     }
     // Excel renders serial 0 as "0 January 1900"; DAYS360 reads it as day 0 of
     // January 1900 (not 31 December 1899), which is what makes it antisymmetric.
@@ -46,7 +51,7 @@ fn excel_serial_to_ymd(serial: i64) -> Option<(i32, u32, u32)> {
         base + chrono::Duration::days(serial)
     } else {
         // From 1900-03-01 (serial 61) onwards IronCalc's serials match Excel.
-        from_excel_date(serial).ok()?
+        from_excel_date(serial, date_system).ok()?
     };
     Some((date.year(), date.month(), date.day()))
 }
@@ -143,14 +148,13 @@ macro_rules! date_part_fn {
             // Convert the serial number to a NaiveDate and return the requested
             // component. Broadcasts element-wise over ranges/arrays. Uses the free
             // function from_excel_date to avoid borrowing self in the closure.
-            self.apply_number_unary(
-                &args[0],
-                cell,
-                |f| match from_excel_date(f.floor() as i64) {
+            let date_system = self.date_system;
+            self.apply_number_unary(&args[0], cell, |f| {
+                match from_excel_date(f.floor() as i64, date_system) {
                     Ok(date) => Ok(date.$method() as f64),
                     Err(_) => Err(Error::NUM),
-                },
-            )
+                }
+            })
         }
     };
 }
@@ -181,16 +185,15 @@ macro_rules! time_part_fn {
 }
 
 use crate::arithmetic::bcast_idx;
-use crate::constants::MAXIMUM_DATE_SERIAL_NUMBER;
-use crate::constants::MINIMUM_DATE_SERIAL_NUMBER;
 use crate::expressions::types::CellReferenceIndex;
 use crate::formatter::dates::date_to_serial_number;
 use crate::formatter::dates::permissive_date_to_serial_number;
+use crate::formatter::dates::serial_from_date;
+use crate::formatter::dates::DateSystem;
 use crate::formatter::dates::DATE_OUT_OF_RANGE_MESSAGE;
 use crate::number_format::to_precision;
 use crate::{
     calc_result::CalcResult,
-    constants::EXCEL_DATE_BASE,
     expressions::parser::{ArrayNode, Node},
     expressions::token::Error,
     formatter::dates::from_excel_date,
@@ -504,7 +507,7 @@ fn parse_year_simple(year_str: &str) -> Result<i32, String> {
     }
 }
 
-pub(crate) fn parse_datevalue_text(value: &str) -> Result<i32, String> {
+pub(crate) fn parse_datevalue_text(value: &str, date_system: DateSystem) -> Result<i32, String> {
     // Trim whitespace and discard any time component (e.g., "2024-02-29 06:00" -> "2024-02-29")
     let mut date_str = value.trim();
     if let Some(idx) = date_str.find('T') {
@@ -568,11 +571,11 @@ pub(crate) fn parse_datevalue_text(value: &str) -> Result<i32, String> {
     let year = parse_year_simple(year_str)?;
 
     // Excel 1900 leap-year bug: 29-Feb-1900 is treated as serial 60
-    if year == 1900 && month == 2 && day == 29 {
+    if date_system == DateSystem::Date1900 && year == 1900 && month == 2 && day == 29 {
         return Ok(60);
     }
 
-    match date_to_serial_number(day, month, year) {
+    match date_to_serial_number(day, month, year, date_system) {
         Ok(n) => Ok(n),
         Err(_) => Err("Not a valid date".to_string()),
     }
@@ -587,7 +590,7 @@ impl<'a> Model<'a> {
         let result = self.evaluate_node_in_context(node, cell);
         match result {
             CalcResult::Number(f) => Ok(f.floor() as i64),
-            CalcResult::String(s) => match parse_datevalue_text(&s) {
+            CalcResult::String(s) => match parse_datevalue_text(&s, self.date_system) {
                 Ok(n) => Ok(n as i64),
                 Err(_) => Err(CalcResult::Error {
                     error: Error::VALUE,
@@ -647,7 +650,7 @@ impl<'a> Model<'a> {
             Ok(d) => d,
             Err(e) => return e,
         };
-        if serial_number > MAXIMUM_DATE_SERIAL_NUMBER as i64 {
+        if serial_number > self.date_system.maximum_serial() as i64 {
             return CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
@@ -679,8 +682,8 @@ impl<'a> Model<'a> {
             month = 1;
             year += 1;
         }
-        match date_to_serial_number(1, month, year) {
-            Ok(serial_number) => CalcResult::Number(serial_number as f64 - 1.0),
+        match date_to_serial_number(1, month, year, self.date_system) {
+            Ok(serial_number) => self.date_serial_result(serial_number - 1, cell),
             Err(message) => CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
@@ -709,7 +712,8 @@ impl<'a> Model<'a> {
             Err(e) => return e,
         };
 
-        fn date_node(year_f: f64, month_f: f64, day_f: f64) -> ArrayNode {
+        let date_system = self.date_system;
+        let date_node = move |year_f: f64, month_f: f64, day_f: f64| -> ArrayNode {
             let year = year_f.floor() as i32;
             if year < 0 {
                 return ArrayNode::Error(Error::NUM);
@@ -718,11 +722,12 @@ impl<'a> Model<'a> {
                 day_f.floor() as i32,
                 month_f.floor() as i32,
                 year,
+                date_system,
             ) {
                 Ok(n) => ArrayNode::Number(n as f64),
                 Err(_) => ArrayNode::Error(Error::NUM),
             }
-        }
+        };
 
         match (&year_na, &month_na, &day_na) {
             (NumberOrArray::Number(yr), NumberOrArray::Number(mo), NumberOrArray::Number(dy)) => {
@@ -827,15 +832,15 @@ impl<'a> Model<'a> {
             date - Months::new(months_abs)
         };
 
-        let serial_number = native_date.num_days_from_ce() - EXCEL_DATE_BASE;
-        if serial_number < MINIMUM_DATE_SERIAL_NUMBER {
+        let serial_number = serial_from_date(native_date, self.date_system);
+        if serial_number < self.date_system.minimum_serial() {
             return CalcResult::Error {
                 error: Error::NUM,
                 origin: cell,
                 message: "EDATE out of bounds".to_string(),
             };
         }
-        CalcResult::Number(serial_number as f64)
+        self.date_serial_result(serial_number, cell)
     }
 
     /// Walk a scalar / range / array node and invoke the provided closure with every
@@ -991,7 +996,7 @@ impl<'a> Model<'a> {
         serial: i64,
         cell: CellReferenceIndex,
     ) -> Result<chrono::NaiveDate, CalcResult> {
-        match from_excel_date(serial) {
+        match from_excel_date(serial, self.date_system) {
             Ok(date) => Ok(date),
             Err(_) => Err(CalcResult::Error {
                 error: Error::NUM,
@@ -999,6 +1004,24 @@ impl<'a> Model<'a> {
                 message: "Out of range parameters for date".to_string(),
             }),
         }
+    }
+
+    /// IronXL: returns a date serial number that a function computed, or #NUM! when the date is
+    /// out of range. A date after 9999-12-31 is out of range in both date systems. A date before
+    /// 1904-01-01 is out of range in the 1904 date system. The 1900 date system keeps the
+    /// upstream lower bound behaviour.
+    fn date_serial_result(&self, serial: i32, cell: CellReferenceIndex) -> CalcResult {
+        let date_system = self.date_system;
+        let too_small =
+            date_system == DateSystem::Date1904 && serial < date_system.minimum_serial();
+        if too_small || serial > date_system.maximum_serial() {
+            return CalcResult::Error {
+                error: Error::NUM,
+                origin: cell,
+                message: DATE_OUT_OF_RANGE_MESSAGE.to_string(),
+            };
+        }
+        CalcResult::Number(serial as f64)
     }
 
     fn weekend_mask(
@@ -1162,7 +1185,7 @@ impl<'a> Model<'a> {
             None => &self.tz,
         };
         match crate::tz::excel_serial_for_now(tz) {
-            Some(serial) => CalcResult::Number(serial.floor()),
+            Some(serial) => CalcResult::Number(self.date_system.serial_from_1900(serial).floor()),
             None => CalcResult::Error {
                 error: Error::ERROR,
                 origin: cell,
@@ -1202,7 +1225,7 @@ impl<'a> Model<'a> {
             None => &self.tz,
         };
         match crate::tz::excel_serial_for_now(tz) {
-            Some(serial) => CalcResult::Number(serial),
+            Some(serial) => CalcResult::Number(self.date_system.serial_from_1900(serial)),
             None => CalcResult::Error {
                 error: Error::ERROR,
                 origin: cell,
@@ -1276,7 +1299,7 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         match self.evaluate_node_in_context(&args[0], cell) {
-            CalcResult::String(s) => match parse_datevalue_text(&s) {
+            CalcResult::String(s) => match parse_datevalue_text(&s, self.date_system) {
                 Ok(n) => CalcResult::Number(n as f64),
                 Err(_) => CalcResult::Error {
                     error: Error::VALUE,
@@ -1451,7 +1474,7 @@ impl<'a> Model<'a> {
         // Excel accepts any serial in 0..=MAXIMUM (a 0 serial is 1900-01-00) and
         // reports #NUM! otherwise. DAYS works directly on serials, so the dates
         // themselves are never materialised.
-        let range = 0..=MAXIMUM_DATE_SERIAL_NUMBER as i64;
+        let range = 0..=self.date_system.maximum_serial() as i64;
         if !range.contains(&start_serial) || !range.contains(&end_serial) {
             return CalcResult::new_error(
                 Error::NUM,
@@ -1491,11 +1514,11 @@ impl<'a> Model<'a> {
                 "Out of range parameters for date".to_string(),
             )
         };
-        let start = match excel_serial_to_ymd(start_serial) {
+        let start = match excel_serial_to_ymd(start_serial, self.date_system) {
             Some(ymd) => ymd,
             None => return out_of_range(),
         };
-        let end = match excel_serial_to_ymd(end_serial) {
+        let end = match excel_serial_to_ymd(end_serial, self.date_system) {
             Some(ymd) => ymd,
             None => return out_of_range(),
         };
@@ -1520,8 +1543,10 @@ impl<'a> Model<'a> {
             1
         };
         // Broadcasts element-wise over a range/array date argument.
+        let date_system = self.date_system;
         self.apply_number_unary(&args[0], cell, move |serial| {
-            let date = from_excel_date(serial.floor() as i64).map_err(|_| Error::NUM)?;
+            let date =
+                from_excel_date(serial.floor() as i64, date_system).map_err(|_| Error::NUM)?;
             weekday_number(date, return_type)
         })
     }
@@ -1586,8 +1611,10 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         // Broadcasts element-wise over a range/array date argument.
-        self.apply_number_unary(&args[0], cell, |serial| {
-            let date = from_excel_date(serial.floor() as i64).map_err(|_| Error::NUM)?;
+        let date_system = self.date_system;
+        self.apply_number_unary(&args[0], cell, move |serial| {
+            let date =
+                from_excel_date(serial.floor() as i64, date_system).map_err(|_| Error::NUM)?;
             Ok(date.iso_week().week() as f64)
         })
     }
@@ -1638,8 +1665,8 @@ impl<'a> Model<'a> {
                 }
             }
         }
-        let serial = date.num_days_from_ce() - EXCEL_DATE_BASE;
-        CalcResult::Number(serial as f64)
+        let serial = serial_from_date(date, self.date_system);
+        self.date_serial_result(serial, cell)
     }
 
     fn get_holiday_set(
@@ -1650,16 +1677,19 @@ impl<'a> Model<'a> {
         let mut holiday_set = std::collections::HashSet::new();
 
         if let Some(arg) = arg_option {
-            self.collect_serial_numbers(arg, cell, |serial| match from_excel_date(serial) {
-                Ok(date) => {
-                    holiday_set.insert(date);
-                    Ok(())
+            let date_system = self.date_system;
+            self.collect_serial_numbers(arg, cell, |serial| {
+                match from_excel_date(serial, date_system) {
+                    Ok(date) => {
+                        holiday_set.insert(date);
+                        Ok(())
+                    }
+                    Err(_) => Err(CalcResult::Error {
+                        error: Error::NUM,
+                        origin: cell,
+                        message: "Invalid holiday date".to_string(),
+                    }),
                 }
-                Err(_) => Err(CalcResult::Error {
-                    error: Error::NUM,
-                    origin: cell,
-                    message: "Invalid holiday date".to_string(),
-                }),
             })?;
         }
 
@@ -1719,8 +1749,8 @@ impl<'a> Model<'a> {
                 }
             }
         }
-        let serial = date.num_days_from_ce() - EXCEL_DATE_BASE;
-        CalcResult::Number(serial as f64)
+        let serial = serial_from_date(date, self.date_system);
+        self.date_serial_result(serial, cell)
     }
 
     pub(crate) fn fn_yearfrac(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {

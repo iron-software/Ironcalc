@@ -5,7 +5,7 @@ use crate::{
         token::Error,
         types::CellReferenceIndex,
     },
-    formatter::format::parse_formatted_number,
+    formatter::format::parse_formatted_number_with_date_system,
     model::Model,
 };
 
@@ -66,8 +66,12 @@ impl<'a> Model<'a> {
                     currencies.push(currency);
                 }
                 // Try to parse as a formatted number (e.g., dates, currencies, percentages)
-                if let Ok((v, _number_format)) = parse_formatted_number(s, &currencies, self.locale)
-                {
+                if let Ok((v, _number_format)) = parse_formatted_number_with_date_system(
+                    s,
+                    &currencies,
+                    self.locale,
+                    self.date_system,
+                ) {
                     return Some(v);
                 }
                 None

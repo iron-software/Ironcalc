@@ -461,11 +461,11 @@ impl<'a> Model<'a> {
         if !(0..=4).contains(&basis) || basis == 2 {
             return CalcResult::new_error(Error::NUM, cell, "invalid basis".to_string());
         }
-        let date_purchased = match from_excel_date(date_purchased_serial) {
+        let date_purchased = match from_excel_date(date_purchased_serial, self.date_system) {
             Ok(d) => d,
             Err(s) => return CalcResult::new_error(Error::NUM, cell, s),
         };
-        let first_period = match from_excel_date(first_period_serial) {
+        let first_period = match from_excel_date(first_period_serial, self.date_system) {
             Ok(d) => d,
             Err(s) => return CalcResult::new_error(Error::NUM, cell, s),
         };
@@ -546,11 +546,11 @@ impl<'a> Model<'a> {
                 "asset life cannot be in [0,3] or [4,5]".to_string(),
             );
         }
-        let date_purchased = match from_excel_date(date_purchased_serial) {
+        let date_purchased = match from_excel_date(date_purchased_serial, self.date_system) {
             Ok(d) => d,
             Err(s) => return CalcResult::new_error(Error::NUM, cell, s),
         };
-        let first_period = match from_excel_date(first_period_serial) {
+        let first_period = match from_excel_date(first_period_serial, self.date_system) {
             Ok(d) => d,
             Err(s) => return CalcResult::new_error(Error::NUM, cell, s),
         };

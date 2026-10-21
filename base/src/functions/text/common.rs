@@ -8,7 +8,7 @@ use crate::{
         token::Error,
         types::CellReferenceIndex,
     },
-    formatter::format::{format_number, parse_formatted_number},
+    formatter::format::{format_number_with_date_system, parse_formatted_number_with_date_system},
     functions::{
         text::util::{substitute, text_after, text_before, Case},
         util::from_wildcard_to_regex,
@@ -288,13 +288,19 @@ impl<'a> Model<'a> {
                     Err(e) => return e,
                 };
                 let locale = self.locale;
+                let date_system = self.date_system;
                 let mut output = Vec::with_capacity(arr.len());
                 for row in arr {
                     let mut data_row = Vec::with_capacity(row.len());
                     for node in row {
                         let out = match node {
                             ArrayNode::Number(f) => {
-                                let d = format_number(f, &format_code, locale);
+                                let d = format_number_with_date_system(
+                                    f,
+                                    &format_code,
+                                    locale,
+                                    date_system,
+                                );
                                 if d.error.is_some() {
                                     ArrayNode::Error(Error::VALUE)
                                 } else {
@@ -302,7 +308,12 @@ impl<'a> Model<'a> {
                                 }
                             }
                             ArrayNode::Empty => {
-                                let d = format_number(0.0, &format_code, locale);
+                                let d = format_number_with_date_system(
+                                    0.0,
+                                    &format_code,
+                                    locale,
+                                    date_system,
+                                );
                                 if d.error.is_some() {
                                     ArrayNode::Error(Error::VALUE)
                                 } else {
@@ -339,7 +350,12 @@ impl<'a> Model<'a> {
                     Ok(s) => s,
                     Err(s) => return s,
                 };
-                let d = format_number(value, &format_code, self.locale);
+                let d = format_number_with_date_system(
+                    value,
+                    &format_code,
+                    self.locale,
+                    self.date_system,
+                );
                 if let Some(_e) = d.error {
                     return CalcResult::Error {
                         error: Error::VALUE,
@@ -1179,7 +1195,12 @@ impl<'a> Model<'a> {
         match self.evaluate_node_in_context(&args[0], cell) {
             CalcResult::String(text) => {
                 let currencies = vec!["$", "€"];
-                if let Ok((value, _)) = parse_formatted_number(&text, &currencies, self.locale) {
+                if let Ok((value, _)) = parse_formatted_number_with_date_system(
+                    &text,
+                    &currencies,
+                    self.locale,
+                    self.date_system,
+                ) {
                     return CalcResult::Number(value);
                 };
                 CalcResult::Error {

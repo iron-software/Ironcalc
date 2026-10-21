@@ -1,49 +1,123 @@
 use chrono::Datelike;
 use chrono::Days;
-use chrono::Duration;
 use chrono::Months;
 use chrono::NaiveDate;
 
+use crate::constants::DATE_1904_OFFSET;
 use crate::constants::EXCEL_DATE_BASE;
 use crate::constants::MAXIMUM_DATE_SERIAL_NUMBER;
 use crate::constants::MINIMUM_DATE_SERIAL_NUMBER;
 
 pub const DATE_OUT_OF_RANGE_MESSAGE: &str = "Out of range parameters for date";
 
+/// IronXL: the date system of a workbook. It sets the date of serial number 0.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DateSystem {
+    /// Serial 1 is 1 January 1900, with Excel's fictional 29 February 1900.
+    #[default]
+    Date1900,
+    /// Serial 0 is 1 January 1904. The 1900 leap-year bug does not apply.
+    Date1904,
+}
+
+impl DateSystem {
+    /// Days from the common era of the date of serial number 0.
+    #[inline]
+    pub(crate) fn base(self) -> i32 {
+        match self {
+            DateSystem::Date1900 => EXCEL_DATE_BASE,
+            DateSystem::Date1904 => EXCEL_DATE_BASE + DATE_1904_OFFSET,
+        }
+    }
+
+    /// The smallest serial number that is a valid date.
+    #[inline]
+    pub(crate) fn minimum_serial(self) -> i32 {
+        match self {
+            DateSystem::Date1900 => MINIMUM_DATE_SERIAL_NUMBER,
+            DateSystem::Date1904 => 0,
+        }
+    }
+
+    /// Converts a serial number of the 1900 date system to this date system.
+    #[inline]
+    pub(crate) fn serial_from_1900(self, serial: f64) -> f64 {
+        serial - (self.base() - EXCEL_DATE_BASE) as f64
+    }
+
+    /// Converts a serial number of this date system to the 1900 date system. A negative
+    /// serial number stays negative, so it stays out of range.
+    #[inline]
+    pub(crate) fn serial_to_1900(self, serial: i64) -> i64 {
+        if serial < 0 {
+            serial
+        } else {
+            serial + (self.base() - EXCEL_DATE_BASE) as i64
+        }
+    }
+
+    /// The serial number of 9999-12-31.
+    #[inline]
+    pub(crate) fn maximum_serial(self) -> i32 {
+        match self {
+            DateSystem::Date1900 => MAXIMUM_DATE_SERIAL_NUMBER,
+            DateSystem::Date1904 => MAXIMUM_DATE_SERIAL_NUMBER - DATE_1904_OFFSET,
+        }
+    }
+}
+
+/// Converts a date to its serial number in the date system.
 #[inline]
-fn convert_to_serial_number(date: NaiveDate) -> i32 {
-    date.num_days_from_ce() - EXCEL_DATE_BASE
+pub fn serial_from_date(date: NaiveDate, date_system: DateSystem) -> i32 {
+    date.num_days_from_ce() - date_system.base()
 }
 
-fn is_date_within_range(date: NaiveDate) -> bool {
-    convert_to_serial_number(date) >= MINIMUM_DATE_SERIAL_NUMBER
-        && convert_to_serial_number(date) <= MAXIMUM_DATE_SERIAL_NUMBER
+fn is_date_within_range(date: NaiveDate, date_system: DateSystem) -> bool {
+    let serial = serial_from_date(date, date_system);
+    serial >= date_system.minimum_serial() && serial <= date_system.maximum_serial()
 }
 
-pub fn from_excel_date(days: i64) -> Result<NaiveDate, String> {
-    if days < MINIMUM_DATE_SERIAL_NUMBER as i64 {
-        return Err(format!(
-            "Excel date must be greater than {MINIMUM_DATE_SERIAL_NUMBER}"
-        ));
+pub fn from_excel_date(days: i64, date_system: DateSystem) -> Result<NaiveDate, String> {
+    let minimum = date_system.minimum_serial();
+    let maximum = date_system.maximum_serial();
+    if days < minimum as i64 {
+        return Err(format!("Excel date must be greater than {minimum}"));
     };
-    if days > MAXIMUM_DATE_SERIAL_NUMBER as i64 {
-        return Err(format!(
-            "Excel date must be less than {MAXIMUM_DATE_SERIAL_NUMBER}"
-        ));
+    if days > maximum as i64 {
+        return Err(format!("Excel date must be less than {maximum}"));
     };
     #[allow(clippy::expect_used)]
-    let dt = NaiveDate::from_ymd_opt(1900, 1, 1).expect("problem with chrono::NaiveDate");
-    Ok(dt + Duration::days(days - 2))
+    let dt = NaiveDate::from_num_days_from_ce_opt(date_system.base() + days as i32)
+        .expect("problem with chrono::NaiveDate");
+    Ok(dt)
 }
 
-pub fn date_to_serial_number(day: u32, month: u32, year: i32) -> Result<i32, String> {
+pub fn date_to_serial_number(
+    day: u32,
+    month: u32,
+    year: i32,
+    date_system: DateSystem,
+) -> Result<i32, String> {
     match NaiveDate::from_ymd_opt(year, month, day) {
-        Some(native_date) => Ok(convert_to_serial_number(native_date)),
+        Some(native_date) => {
+            let serial = serial_from_date(native_date, date_system);
+            // IronXL: the 1904 date system has no date before 1904-01-01. The 1900 date system
+            // keeps the upstream behaviour.
+            if date_system == DateSystem::Date1904 && serial < date_system.minimum_serial() {
+                return Err(DATE_OUT_OF_RANGE_MESSAGE.to_string());
+            }
+            Ok(serial)
+        }
         None => Err(DATE_OUT_OF_RANGE_MESSAGE.to_string()),
     }
 }
 
-pub fn permissive_date_to_serial_number(day: i32, month: i32, year: i32) -> Result<i32, String> {
+pub fn permissive_date_to_serial_number(
+    day: i32,
+    month: i32,
+    year: i32,
+    date_system: DateSystem,
+) -> Result<i32, String> {
     // Excel parses `DATE` very permissively. It allows not just for valid date values, but it
     // allows for invalid dates as well. If you for example enter `DATE(1900, 1, 32)` it will
     // return the date `1900-02-01`. Despite giving a day that is out of range it will just
@@ -53,7 +127,7 @@ pub fn permissive_date_to_serial_number(day: i32, month: i32, year: i32) -> Resu
     // possible.
 
     // Special case for the minimum date
-    if year == 1899 && month == 12 && day == 31 {
+    if date_system == DateSystem::Date1900 && year == 1899 && month == 12 && day == 31 {
         return Ok(MINIMUM_DATE_SERIAL_NUMBER);
     }
     let Some(mut date) = NaiveDate::from_ymd_opt(year, 1, 1) else {
@@ -69,7 +143,7 @@ pub fn permissive_date_to_serial_number(day: i32, month: i32, year: i32) -> Resu
     //
     // As a result, we have to run range checks as we parse the date from the biggest unit to the
     // smallest unit.
-    if !is_date_within_range(date) {
+    if !is_date_within_range(date, date_system) {
         return Err(DATE_OUT_OF_RANGE_MESSAGE.to_string());
     }
 
@@ -81,7 +155,7 @@ pub fn permissive_date_to_serial_number(day: i32, month: i32, year: i32) -> Resu
         } else {
             date = date + Months::new(abs_month);
         }
-        if !is_date_within_range(date) {
+        if !is_date_within_range(date, date_system) {
             return Err(DATE_OUT_OF_RANGE_MESSAGE.to_string());
         }
         date
@@ -95,13 +169,13 @@ pub fn permissive_date_to_serial_number(day: i32, month: i32, year: i32) -> Resu
         } else {
             date = date + Days::new(abs_day);
         }
-        if !is_date_within_range(date) {
+        if !is_date_within_range(date, date_system) {
             return Err(DATE_OUT_OF_RANGE_MESSAGE.to_string());
         }
         date
     };
 
-    Ok(convert_to_serial_number(date))
+    Ok(serial_from_date(date, date_system))
 }
 
 #[cfg(test)]
@@ -111,48 +185,78 @@ mod tests {
     #[test]
     fn test_permissive_date_to_serial_number() {
         assert_eq!(
-            permissive_date_to_serial_number(42, 42, 2002),
-            date_to_serial_number(12, 7, 2005)
+            permissive_date_to_serial_number(42, 42, 2002, DateSystem::Date1900),
+            date_to_serial_number(12, 7, 2005, DateSystem::Date1900)
         );
         assert_eq!(
-            permissive_date_to_serial_number(1, 42, 2002),
-            date_to_serial_number(1, 6, 2005)
+            permissive_date_to_serial_number(1, 42, 2002, DateSystem::Date1900),
+            date_to_serial_number(1, 6, 2005, DateSystem::Date1900)
         );
         assert_eq!(
-            permissive_date_to_serial_number(1, 15, 2000),
-            date_to_serial_number(1, 3, 2001)
+            permissive_date_to_serial_number(1, 15, 2000, DateSystem::Date1900),
+            date_to_serial_number(1, 3, 2001, DateSystem::Date1900)
         );
         assert_eq!(
-            permissive_date_to_serial_number(1, 49, 2000),
-            date_to_serial_number(1, 1, 2004)
+            permissive_date_to_serial_number(1, 49, 2000, DateSystem::Date1900),
+            date_to_serial_number(1, 1, 2004, DateSystem::Date1900)
         );
         assert_eq!(
-            permissive_date_to_serial_number(1, 49, 2000),
-            date_to_serial_number(1, 1, 2004)
+            permissive_date_to_serial_number(1, 49, 2000, DateSystem::Date1900),
+            date_to_serial_number(1, 1, 2004, DateSystem::Date1900)
         );
         assert_eq!(
-            permissive_date_to_serial_number(31, 49, 2000),
-            date_to_serial_number(31, 1, 2004)
+            permissive_date_to_serial_number(31, 49, 2000, DateSystem::Date1900),
+            date_to_serial_number(31, 1, 2004, DateSystem::Date1900)
         );
         assert_eq!(
-            permissive_date_to_serial_number(256, 49, 2000),
-            date_to_serial_number(12, 9, 2004)
+            permissive_date_to_serial_number(256, 49, 2000, DateSystem::Date1900),
+            date_to_serial_number(12, 9, 2004, DateSystem::Date1900)
         );
         assert_eq!(
-            permissive_date_to_serial_number(256, 1, 2004),
-            date_to_serial_number(12, 9, 2004)
+            permissive_date_to_serial_number(256, 1, 2004, DateSystem::Date1900),
+            date_to_serial_number(12, 9, 2004, DateSystem::Date1900)
         );
     }
 
     #[test]
     fn test_max_and_min_dates() {
         assert_eq!(
-            permissive_date_to_serial_number(31, 12, 9999),
+            permissive_date_to_serial_number(31, 12, 9999, DateSystem::Date1900),
             Ok(MAXIMUM_DATE_SERIAL_NUMBER),
         );
         assert_eq!(
-            permissive_date_to_serial_number(31, 12, 1899),
+            permissive_date_to_serial_number(31, 12, 1899, DateSystem::Date1900),
             Ok(MINIMUM_DATE_SERIAL_NUMBER),
         );
+    }
+
+    #[test]
+    fn test_date_1904() {
+        let date_1904 = DateSystem::Date1904;
+        assert_eq!(date_to_serial_number(1, 1, 1904, date_1904), Ok(0));
+        assert_eq!(date_to_serial_number(1, 1, 2026, date_1904), Ok(44_561));
+        assert_eq!(
+            from_excel_date(0, date_1904).ok(),
+            NaiveDate::from_ymd_opt(1904, 1, 1)
+        );
+        assert!(NaiveDate::from_ymd_opt(1904, 1, 1).is_some());
+        assert!(date_to_serial_number(31, 12, 1903, date_1904).is_err());
+        assert_eq!(
+            date_to_serial_number(31, 12, 1898, DateSystem::Date1900),
+            Ok(-364)
+        );
+        assert!(from_excel_date(-1, date_1904).is_err());
+        assert!(from_excel_date(date_1904.maximum_serial() as i64 + 1, date_1904).is_err());
+        assert_eq!(
+            permissive_date_to_serial_number(31, 12, 9999, date_1904),
+            Ok(date_1904.maximum_serial())
+        );
+        assert!(permissive_date_to_serial_number(31, 12, 1899, date_1904).is_err());
+        assert!(permissive_date_to_serial_number(31, 12, 1903, date_1904).is_err());
+        assert_eq!(date_1904.serial_to_1900(0), 1_462);
+        assert_eq!(date_1904.serial_to_1900(-1), -1);
+        assert_eq!(date_1904.serial_from_1900(1_462.5), 0.5);
+        assert_eq!(DateSystem::Date1900.serial_to_1900(42), 42);
+        assert_eq!(DateSystem::Date1900.serial_from_1900(42.0), 42.0);
     }
 }

@@ -32,6 +32,9 @@ pub(crate) const EXCEL_PRECISION: usize = 15;
 /// The 2 days offset is because of Excel 1900 bug
 pub(crate) const EXCEL_DATE_BASE: i32 = 693_594;
 
+/// IronXL: 1462 is the 1900-system serial number of 1904-01-01, serial 0 of the 1904 date system.
+pub(crate) const DATE_1904_OFFSET: i32 = 1_462;
+
 /// We do not support dates before 1899-12-31.
 pub(crate) const MINIMUM_DATE_SERIAL_NUMBER: i32 = 1;
 

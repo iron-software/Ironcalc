@@ -1,6 +1,6 @@
 use crate::constants::{LAST_COLUMN, LAST_ROW};
 use crate::expressions::types::CellReferenceIndex;
-use crate::functions::util::build_criteria;
+use crate::functions::util::build_criteria_with_date_system;
 use crate::{
     calc_result::{CalcResult, Range},
     expressions::parser::{ArrayNode, Node},
@@ -89,7 +89,11 @@ impl<'a> Model<'a> {
             }
         }
         for criterion in criteria.iter() {
-            fn_criteria.push(build_criteria(criterion, self.locale));
+            fn_criteria.push(build_criteria_with_date_system(
+                criterion,
+                self.locale,
+                self.date_system,
+            ));
         }
 
         let mut total = 0.0;
@@ -240,7 +244,11 @@ impl<'a> Model<'a> {
             }
         }
         for criterion in criteria.iter() {
-            fn_criteria.push(build_criteria(criterion, self.locale));
+            fn_criteria.push(build_criteria_with_date_system(
+                criterion,
+                self.locale,
+                self.date_system,
+            ));
         }
 
         self.run_ifs(&sum_range, ranges.as_slice(), &fn_criteria, cell, apply)
@@ -419,7 +427,11 @@ impl<'a> Model<'a> {
         for criteria_row in &criteria_grid {
             let mut out_row: Vec<ArrayNode> = Vec::with_capacity(criteria_row.len());
             for criterion in criteria_row {
-                let fn_criteria = [build_criteria(criterion, self.locale)];
+                let fn_criteria = [build_criteria_with_date_system(
+                    criterion,
+                    self.locale,
+                    self.date_system,
+                )];
                 let mut total = 0.0;
                 let node = match self.run_ifs(
                     &sum_range,

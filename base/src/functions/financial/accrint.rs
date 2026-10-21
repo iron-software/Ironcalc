@@ -377,15 +377,15 @@ impl<'a> Model<'a> {
             );
         }
 
-        let issue = match from_excel_date(issue_serial) {
+        let issue = match from_excel_date(issue_serial, self.date_system) {
             Ok(d) => d,
             Err(e) => return CalcResult::new_error(Error::NUM, cell, e),
         };
-        let first_interest = match from_excel_date(first_interest_serial) {
+        let first_interest = match from_excel_date(first_interest_serial, self.date_system) {
             Ok(d) => d,
             Err(e) => return CalcResult::new_error(Error::NUM, cell, e),
         };
-        let settlement = match from_excel_date(settlement_serial) {
+        let settlement = match from_excel_date(settlement_serial, self.date_system) {
             Ok(d) => d,
             Err(e) => return CalcResult::new_error(Error::NUM, cell, e),
         };
