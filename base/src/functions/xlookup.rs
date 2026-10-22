@@ -1,5 +1,7 @@
 use crate::constants::{LAST_COLUMN, LAST_ROW};
+use crate::expressions::parser::ArrayNode;
 use crate::expressions::types::CellReferenceIndex;
+use crate::worksheet::WorksheetDimension;
 use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
 };
@@ -9,6 +11,7 @@ use super::{
         binary_search_descending_or_greater, binary_search_descending_or_smaller,
         binary_search_or_greater, binary_search_or_smaller,
     },
+    lookup_and_reference::array_node_to_calc_result,
     util::{compare_values, from_wildcard_to_regex, result_matches_regex},
 };
 
@@ -118,6 +121,34 @@ fn linear_search(
     None
 }
 
+/// A row or a column that XLOOKUP reads: a range reference or an array value.
+enum LookupVector {
+    Range {
+        left: CellReferenceIndex,
+        right: CellReferenceIndex,
+    },
+    Array(Vec<Vec<ArrayNode>>),
+}
+
+impl LookupVector {
+    /// The number of rows and the number of columns, before a whole column or row is clamped.
+    fn shape(&self) -> (i32, i32) {
+        match self {
+            LookupVector::Range { left, right } => {
+                ((right.row - left.row) + 1, (right.column - left.column) + 1)
+            }
+            LookupVector::Array(rows) => array_shape(rows),
+        }
+    }
+}
+
+fn array_shape(rows: &[Vec<ArrayNode>]) -> (i32, i32) {
+    (
+        rows.len() as i32,
+        rows.first().map(|row| row.len()).unwrap_or(0) as i32,
+    )
+}
+
 impl<'a> Model<'a> {
     /// The XLOOKUP function searches a range or an array, and then returns the item corresponding
     /// to the first match it finds. If no match exists, then XLOOKUP can return the closest (approximate) match.
@@ -213,15 +244,10 @@ impl<'a> Model<'a> {
             // default
             SearchMode::StartAtFirstItem
         };
-        // lookup_array
-        match self.evaluate_node_in_context(&args[1], cell) {
+        // lookup_array: a range or an array value, as one row or one column
+        let lookup = match self.evaluate_node_in_context(&args[1], cell) {
             CalcResult::Range { left, right } => {
-                let is_row_vector;
-                if left.row == right.row {
-                    is_row_vector = false;
-                } else if left.column == right.column {
-                    is_row_vector = true;
-                } else {
+                if left.row != right.row && left.column != right.column {
                     // second argument must be a vector
                     return CalcResult::Error {
                         error: Error::ERROR,
@@ -229,162 +255,164 @@ impl<'a> Model<'a> {
                         message: "Second argument must be a vector".to_string(),
                     };
                 }
-                // return array
-                match self.evaluate_node_in_context(&args[2], cell) {
-                    CalcResult::Range {
-                        left: result_left,
-                        right: result_right,
-                    } => {
-                        if result_right.row - result_left.row != right.row - left.row
-                            || result_right.column - result_left.column
-                                != right.column - left.column
-                        {
-                            return CalcResult::Error {
-                                error: Error::VALUE,
-                                origin: cell,
-                                message: "Arrays must be of the same size".to_string(),
-                            };
-                        }
-                        let mut row2 = right.row;
-                        let row1 = left.row;
-                        let mut column2 = right.column;
-                        let column1 = left.column;
-
-                        if row1 == 1 && row2 == LAST_ROW {
-                            row2 = match self.workbook.worksheet(left.sheet) {
-                                Ok(s) => s.dimension().max_row,
-                                Err(_) => {
-                                    return CalcResult::new_error(
-                                        Error::ERROR,
-                                        cell,
-                                        format!("Invalid worksheet index: '{}'", left.sheet),
-                                    );
-                                }
-                            };
-                        }
-                        if column1 == 1 && column2 == LAST_COLUMN {
-                            column2 = match self.workbook.worksheet(left.sheet) {
-                                Ok(s) => s.dimension().max_column,
-                                Err(_) => {
-                                    return CalcResult::new_error(
-                                        Error::ERROR,
-                                        cell,
-                                        format!("Invalid worksheet index: '{}'", left.sheet),
-                                    );
-                                }
-                            };
-                        }
-                        let left = CellReferenceIndex {
-                            sheet: left.sheet,
-                            column: column1,
-                            row: row1,
-                        };
-                        let right = CellReferenceIndex {
-                            sheet: left.sheet,
-                            column: column2,
-                            row: row2,
-                        };
-                        match search_mode {
-                            SearchMode::StartAtFirstItem | SearchMode::StartAtLastItem => {
-                                let array = &self.prepare_array(&left, &right, is_row_vector);
-                                match linear_search(&lookup_value, array, search_mode, match_mode) {
-                                    Some(index) => {
-                                        let row_index =
-                                            if is_row_vector { index as i32 } else { 0 };
-                                        let column_index =
-                                            if is_row_vector { 0 } else { index as i32 };
-                                        self.evaluate_cell(CellReferenceIndex {
-                                            sheet: result_left.sheet,
-                                            row: result_left.row + row_index,
-                                            column: result_left.column + column_index,
-                                        })
-                                    }
-                                    None => if_not_found,
-                                }
-                            }
-                            SearchMode::BinarySearchAscending
-                            | SearchMode::BinarySearchDescending => {
-                                let index = if match_mode == MatchMode::ExactMatchLarger {
-                                    if search_mode == SearchMode::BinarySearchAscending {
-                                        binary_search_or_greater(
-                                            &lookup_value,
-                                            &self.prepare_array(&left, &right, is_row_vector),
-                                        )
-                                    } else {
-                                        binary_search_descending_or_greater(
-                                            &lookup_value,
-                                            &self.prepare_array(&left, &right, is_row_vector),
-                                        )
-                                    }
-                                } else if search_mode == SearchMode::BinarySearchAscending {
-                                    binary_search_or_smaller(
-                                        &lookup_value,
-                                        &self.prepare_array(&left, &right, is_row_vector),
-                                    )
-                                } else {
-                                    binary_search_descending_or_smaller(
-                                        &lookup_value,
-                                        &self.prepare_array(&left, &right, is_row_vector),
-                                    )
-                                };
-                                match index {
-                                    None => if_not_found,
-                                    Some(l) => {
-                                        let row =
-                                            result_left.row + if is_row_vector { l } else { 0 };
-                                        let column =
-                                            result_left.column + if is_row_vector { 0 } else { l };
-                                        if match_mode == MatchMode::ExactMatch {
-                                            let value = self.evaluate_cell(CellReferenceIndex {
-                                                sheet: left.sheet,
-                                                row: left.row + if is_row_vector { l } else { 0 },
-                                                column: left.column
-                                                    + if is_row_vector { 0 } else { l },
-                                            });
-                                            if compare_values(&value, &lookup_value) == 0 {
-                                                self.evaluate_cell(CellReferenceIndex {
-                                                    sheet: result_left.sheet,
-                                                    row,
-                                                    column,
-                                                })
-                                            } else {
-                                                if_not_found
-                                            }
-                                        } else if match_mode == MatchMode::ExactMatchSmaller
-                                            || match_mode == MatchMode::ExactMatchLarger
-                                        {
-                                            self.evaluate_cell(CellReferenceIndex {
-                                                sheet: result_left.sheet,
-                                                row,
-                                                column,
-                                            })
-                                        } else {
-                                            CalcResult::Error {
-                                                error: Error::VALUE,
-                                                origin: cell,
-                                                message: "Cannot use wildcard in binary search"
-                                                    .to_string(),
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    error @ CalcResult::Error { .. } => error,
-                    _ => CalcResult::Error {
+                LookupVector::Range { left, right }
+            }
+            CalcResult::Array(rows) => {
+                let shape = array_shape(&rows);
+                if shape.0 == 0 || shape.1 == 0 || (shape.0 != 1 && shape.1 != 1) {
+                    return CalcResult::Error {
                         error: Error::VALUE,
                         origin: cell,
-                        message: "Range expected".to_string(),
-                    },
+                        message: "Second argument must be a vector".to_string(),
+                    };
+                }
+                LookupVector::Array(rows)
+            }
+            error @ CalcResult::Error { .. } => return error,
+            _ => {
+                return CalcResult::Error {
+                    error: Error::NA,
+                    origin: cell,
+                    message: "Range expected".to_string(),
                 }
             }
-            error @ CalcResult::Error { .. } => error,
-            _ => CalcResult::Error {
-                error: Error::NA,
+        };
+        // return array: a range or an array value with the shape of lookup_array
+        let result = match self.evaluate_node_in_context(&args[2], cell) {
+            CalcResult::Range { left, right } => LookupVector::Range { left, right },
+            CalcResult::Array(rows) => LookupVector::Array(rows),
+            error @ CalcResult::Error { .. } => return error,
+            _ => {
+                return CalcResult::Error {
+                    error: Error::VALUE,
+                    origin: cell,
+                    message: "Range expected".to_string(),
+                }
+            }
+        };
+        if result.shape() != lookup.shape() {
+            return CalcResult::Error {
+                error: Error::VALUE,
                 origin: cell,
-                message: "Range expected".to_string(),
-            },
+                message: "Arrays must be of the same size".to_string(),
+            };
+        }
+        let array = match self.lookup_vector_values(lookup, cell) {
+            Ok(array) => array,
+            Err(error) => return error,
+        };
+        let index = match search_mode {
+            SearchMode::StartAtFirstItem | SearchMode::StartAtLastItem => {
+                linear_search(&lookup_value, &array, search_mode, match_mode)
+            }
+            SearchMode::BinarySearchAscending | SearchMode::BinarySearchDescending => {
+                let index = if match_mode == MatchMode::ExactMatchLarger {
+                    if search_mode == SearchMode::BinarySearchAscending {
+                        binary_search_or_greater(&lookup_value, &array)
+                    } else {
+                        binary_search_descending_or_greater(&lookup_value, &array)
+                    }
+                } else if search_mode == SearchMode::BinarySearchAscending {
+                    binary_search_or_smaller(&lookup_value, &array)
+                } else {
+                    binary_search_descending_or_smaller(&lookup_value, &array)
+                };
+                match index {
+                    Some(_) if match_mode == MatchMode::WildcardMatch => {
+                        return CalcResult::Error {
+                            error: Error::VALUE,
+                            origin: cell,
+                            message: "Cannot use wildcard in binary search".to_string(),
+                        };
+                    }
+                    Some(l) => Some(l as usize).filter(|&l| {
+                        match_mode != MatchMode::ExactMatch
+                            || compare_values(&array[l], &lookup_value) == 0
+                    }),
+                    None => None,
+                }
+            }
+        };
+        match index {
+            Some(index) => self.lookup_vector_item(result, index, cell),
+            None => if_not_found,
+        }
+    }
+
+    /// Reads all the values of a lookup vector, in order.
+    /// A range of a whole column or a whole row stops at the used range of its sheet.
+    fn lookup_vector_values(
+        &mut self,
+        vector: LookupVector,
+        cell: CellReferenceIndex,
+    ) -> Result<Vec<CalcResult>, CalcResult> {
+        match vector {
+            LookupVector::Range { left, right } => {
+                let is_column = left.row != right.row;
+                let mut row2 = right.row;
+                let mut column2 = right.column;
+                if left.row == 1 && row2 == LAST_ROW {
+                    row2 = self.sheet_dimension(left.sheet, cell)?.max_row;
+                }
+                if left.column == 1 && column2 == LAST_COLUMN {
+                    column2 = self.sheet_dimension(left.sheet, cell)?.max_column;
+                }
+                let right = CellReferenceIndex {
+                    sheet: left.sheet,
+                    column: column2,
+                    row: row2,
+                };
+                Ok(self.prepare_array(&left, &right, is_column))
+            }
+            LookupVector::Array(rows) => Ok(rows
+                .iter()
+                .flatten()
+                .map(|node| array_node_to_calc_result(node, cell))
+                .collect()),
+        }
+    }
+
+    /// Reads the item at `index` of a lookup vector.
+    fn lookup_vector_item(
+        &mut self,
+        vector: LookupVector,
+        index: usize,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        match vector {
+            LookupVector::Range { left, right } => {
+                let is_column = left.row != right.row;
+                let offset = index as i32;
+                self.evaluate_cell(CellReferenceIndex {
+                    sheet: left.sheet,
+                    row: left.row + if is_column { offset } else { 0 },
+                    column: left.column + if is_column { 0 } else { offset },
+                })
+            }
+            LookupVector::Array(rows) => {
+                // The shape check makes `index` valid for a single row or a single column.
+                let node = if rows.len() == 1 {
+                    &rows[0][index]
+                } else {
+                    &rows[index][0]
+                };
+                array_node_to_calc_result(node, cell)
+            }
+        }
+    }
+
+    fn sheet_dimension(
+        &self,
+        sheet: u32,
+        cell: CellReferenceIndex,
+    ) -> Result<WorksheetDimension, CalcResult> {
+        match self.workbook.worksheet(sheet) {
+            Ok(s) => Ok(s.dimension()),
+            Err(_) => Err(CalcResult::new_error(
+                Error::ERROR,
+                cell,
+                format!("Invalid worksheet index: '{sheet}'"),
+            )),
         }
     }
 }
