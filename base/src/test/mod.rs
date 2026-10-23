@@ -133,6 +133,7 @@ mod test_now;
 mod test_percentage;
 mod test_range_evaluation;
 mod test_set_functions_error_handling;
+mod test_shared_formula_index;
 mod test_sheet_names;
 mod test_spill_functions;
 mod test_today;
