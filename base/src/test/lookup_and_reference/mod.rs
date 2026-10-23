@@ -11,3 +11,4 @@ mod test_fn_vlookup;
 mod test_fn_wrapcols_wraprows;
 mod test_fn_xlookup;
 mod test_fn_xmatch;
+mod test_one_cell_reference;

@@ -3,10 +3,7 @@ use crate::expressions::parser::ArrayNode;
 use crate::expressions::types::CellReferenceIndex;
 use crate::worksheet::WorksheetDimension;
 use crate::{
-    calc_result::CalcResult,
-    expressions::parser::Node,
-    expressions::token::Error,
-    model::{CellOrRange, Model},
+    calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
 };
 
 use super::{
@@ -344,23 +341,6 @@ impl<'a> Model<'a> {
 
     /// Reads all the values of a lookup vector, in order.
     /// A range of a whole column or a whole row stops at the used range of its sheet.
-    // A one-cell reference is a range of one cell, as in Excel, not the value of the cell
-    fn evaluate_lookup_vector_node(&mut self, node: &Node, cell: CellReferenceIndex) -> CalcResult {
-        match node {
-            Node::ReferenceKind { .. } => {
-                let range = self.evaluate_node_with_reference(node, cell);
-                if let CalcResult::Range { left, .. } = &range {
-                    self.support
-                        .entry(cell)
-                        .or_default()
-                        .push(CellOrRange::Cell((left.sheet, left.row, left.column)));
-                }
-                range
-            }
-            _ => self.evaluate_node_in_context(node, cell),
-        }
-    }
-
     fn lookup_vector_values(
         &mut self,
         vector: LookupVector,
