@@ -214,10 +214,10 @@ impl<'a> Model<'a> {
             Node::ReferenceKind { .. } => {
                 let range = self.evaluate_node_with_reference(node, cell);
                 if let CalcResult::Range { left, .. } = &range {
-                    self.support
-                        .entry(cell)
-                        .or_default()
-                        .push(CellOrRange::Cell((left.sheet, left.row, left.column)));
+                    self.record_support(
+                        cell,
+                        CellOrRange::Cell((left.sheet, left.row, left.column)),
+                    );
                 }
                 range
             }

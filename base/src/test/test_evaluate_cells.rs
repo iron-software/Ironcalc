@@ -92,21 +92,44 @@ fn an_empty_list_changes_nothing() {
 }
 
 #[test]
-fn repeated_calls_do_not_grow_the_support_of_a_cell() {
-    use crate::expressions::types::CellReferenceIndex;
+fn only_the_first_phase_of_evaluate_keeps_support_records() {
+    // IronXL: only the spill order of `evaluate` reads the support of a cell, so no other evaluation keeps a record.
     let mut model = chain_model();
-    let b1 = CellReferenceIndex {
-        sheet: 0,
-        row: 1,
-        column: 2,
-    };
-    let after_evaluate = model.support.get(&b1).map_or(0, Vec::len);
+    assert!(model.support.is_empty());
     for value in 0..1000 {
         model._set("A1", &value.to_string());
         model.evaluate_cells(&[B1]).unwrap();
     }
     assert_eq!(model._get_text("B1"), "1998");
-    assert_eq!(model.support.get(&b1).map_or(0, Vec::len), after_evaluate);
+    assert!(model.support.is_empty());
+    model.evaluate();
+    assert!(model.support.is_empty());
+}
+
+#[test]
+fn a_pass_over_more_formulas_than_the_walk_keeps_gives_each_result() {
+    // IronXL: the walk keeps the precedents of at most 65,536 parsed formulas, then starts again. Each cell of B has a
+    // formula of its own, and C1:C3 share one formula, before and after the walk starts again.
+    let mut model = new_empty_model();
+    model._set("A1", "2");
+    model._set("C1", "=$A$1*3");
+    let count = 70_000;
+    for row in 1..=count {
+        model._set(&format!("B{row}"), &format!("=A1+{row}"));
+    }
+    model._set("C2", "=$A$1*3");
+    model._set("C3", &format!("=$A$1*3+B{count}"));
+    let mut cells: Vec<(u32, i32, i32)> = vec![(0, 1, 3)];
+    cells.extend((1..=count).map(|row| (0, row, 2)));
+    cells.extend([(0, 2, 3), (0, 3, 3)]);
+    model.evaluate_cells(&cells).unwrap();
+    assert_eq!(model._get_text("B1"), "3");
+    assert_eq!(model._get_text("B65537"), "65539");
+    assert_eq!(model._get_text(&format!("B{count}")), "70002");
+    assert_eq!(model._get_text("C1"), "6");
+    assert_eq!(model._get_text("C2"), "6");
+    assert_eq!(model._get_text("C3"), "70008");
+    assert!(model.support.is_empty());
 }
 
 #[test]

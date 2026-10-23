@@ -701,6 +701,7 @@ impl<'a> Model<'a> {
             last_lambda_id: 0,
             spill_cells: Vec::new(),
             support: HashMap::new(),
+            recording_support: false,
             cf_cache: HashMap::new(),
             date_system: DateSystem::default(),
         };

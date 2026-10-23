@@ -29,6 +29,10 @@ use crate::{
 /// an index of the formula cells, so a whole-column range does not visit every row.
 const SMALL_RANGE: i64 = 1024;
 
+/// The walk keeps the precedents of at most this many parsed formulas. A pass over many distinct formulas, such as a
+/// column with a formula of its own in each cell, then holds bounded memory.
+const KEPT_FORMULAS: usize = 65_536;
+
 /// A cell as `(sheet, row, column)`.
 type CellKey = (u32, i32, i32);
 
@@ -96,7 +100,7 @@ enum Step {
 /// It is valid only while no formula changes, so a pass creates a new one.
 #[derive(Default)]
 pub(crate) struct PrecedentWalk {
-    /// The precedents of each parsed formula, by `(sheet, formula index)`.
+    /// The precedents of each parsed formula, by `(sheet, formula index)`: at most `KEPT_FORMULAS` of them.
     formulas: HashMap<(u32, i32), FormulaPrecedents>,
     states: HashMap<CellKey, VisitState>,
     frames: Vec<Frame>,
@@ -222,6 +226,9 @@ impl Model<'_> {
             None => return,
         };
         let (sheet, row, column) = cell;
+        if walk.formulas.len() >= KEPT_FORMULAS && !walk.formulas.contains_key(&(sheet, formula)) {
+            walk.formulas.clear();
+        }
         let precedents = walk.formulas.entry((sheet, formula)).or_insert_with(|| {
             let mut precedents = FormulaPrecedents::default();
             if let Some((node, _)) = self
