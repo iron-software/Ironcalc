@@ -5,7 +5,10 @@ use crate::expressions::parser::ArrayNode;
 use crate::expressions::types::CellReferenceIndex;
 use crate::implicit_intersection::implicit_intersection;
 use crate::{
-    calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
+    calc_result::CalcResult,
+    expressions::parser::Node,
+    expressions::token::Error,
+    model::{CellOrRange, Model},
     utils::ParsedReference,
 };
 
@@ -198,6 +201,30 @@ fn index_from_array(
 }
 
 impl<'a> Model<'a> {
+    /// Evaluates the range argument of a lookup function: XLOOKUP, MATCH, XMATCH,
+    /// INDEX, LOOKUP, VLOOKUP, and HLOOKUP.
+    /// A one-cell reference is a range of one cell, as in Excel, not the value of the cell.
+    /// The cell becomes a precedent of `cell`, so a change of the cell updates the result.
+    pub(crate) fn evaluate_lookup_vector_node(
+        &mut self,
+        node: &Node,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        match node {
+            Node::ReferenceKind { .. } => {
+                let range = self.evaluate_node_with_reference(node, cell);
+                if let CalcResult::Range { left, .. } = &range {
+                    self.support
+                        .entry(cell)
+                        .or_default()
+                        .push(CellOrRange::Cell((left.sheet, left.row, left.column)));
+                }
+                range
+            }
+            _ => self.evaluate_node_in_context(node, cell),
+        }
+    }
+
     /// Materializes a value that is expected to be a vector (a single row or a
     /// single column) into a flat list of values. Accepts both range references
     /// and in-formula array literals. Used by the vector-based lookup functions
@@ -310,7 +337,7 @@ impl<'a> Model<'a> {
         let row_num = row_num.floor() as usize;
         let col_num = col_num.floor() as usize;
 
-        match self.evaluate_node_in_context(&args[0], cell) {
+        match self.evaluate_lookup_vector_node(&args[0], cell) {
             CalcResult::Range { left, right } => {
                 let num_rows = (right.row - left.row + 1) as usize;
                 let (row_eff, col_eff) =
@@ -410,7 +437,7 @@ impl<'a> Model<'a> {
         } else {
             1
         };
-        let match_range = self.evaluate_node_in_context(&args[1], cell);
+        let match_range = self.evaluate_lookup_vector_node(&args[1], cell);
 
         // MATCH operates on a vector (a single row or single column). We
         // materialize the second argument, be it a range reference or an array
@@ -508,7 +535,7 @@ impl<'a> Model<'a> {
         } else {
             true
         };
-        let range = self.evaluate_node_in_context(&args[1], cell);
+        let range = self.evaluate_lookup_vector_node(&args[1], cell);
         let table = match range {
             CalcResult::Range { left, right } => LookupTable::Range { left, right },
             CalcResult::Array(array) => LookupTable::Array(array),
@@ -572,7 +599,7 @@ impl<'a> Model<'a> {
         } else {
             true
         };
-        let range = self.evaluate_node_in_context(&args[1], cell);
+        let range = self.evaluate_lookup_vector_node(&args[1], cell);
         let table = match range {
             CalcResult::Range { left, right } => LookupTable::Range { left, right },
             CalcResult::Array(array) => LookupTable::Array(array),
@@ -644,7 +671,7 @@ impl<'a> Model<'a> {
         if args.len() == 3 {
             // Vector form: search the lookup vector, return from the result
             // vector at the same position.
-            let value = self.evaluate_node_in_context(&args[1], cell);
+            let value = self.evaluate_lookup_vector_node(&args[1], cell);
             let lookup_vector = match self.as_vector(value, cell) {
                 Ok(values) => values,
                 Err(error) => return error,
@@ -653,7 +680,7 @@ impl<'a> Model<'a> {
                 Some(l) => l,
                 None => return not_found,
             };
-            let result = self.evaluate_node_in_context(&args[2], cell);
+            let result = self.evaluate_lookup_vector_node(&args[2], cell);
             let result_vector = match self.as_vector(result, cell) {
                 Ok(values) => values,
                 Err(error) => return error,
@@ -663,7 +690,7 @@ impl<'a> Model<'a> {
 
         // Array form (also covers a plain vector, where the first and last
         // row/column coincide).
-        let value = self.evaluate_node_in_context(&args[1], cell);
+        let value = self.evaluate_lookup_vector_node(&args[1], cell);
         let table = match value {
             CalcResult::Range { left, right } => LookupTable::Range { left, right },
             CalcResult::Array(array) => LookupTable::Array(array),
