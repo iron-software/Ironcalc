@@ -480,6 +480,27 @@ fn static_analysis_indirect(_args: &[Node]) -> StaticResult {
     StaticResult::Unknown
 }
 
+/// XLOOKUP gives one value when the return array has the static shape of the lookup array.
+/// A wider return array gives a whole row or column, which spills, so the result is unknown.
+fn static_analysis_xlookup(args: &[Node]) -> StaticResult {
+    if args.len() < 3 {
+        return StaticResult::Scalar;
+    }
+    match (
+        run_static_analysis_on_node(&args[1]),
+        run_static_analysis_on_node(&args[2]),
+    ) {
+        (StaticResult::Scalar, StaticResult::Scalar) => StaticResult::Scalar,
+        (StaticResult::Range(a1, b1), StaticResult::Range(a2, b2))
+        | (StaticResult::Array(a1, b1), StaticResult::Array(a2, b2))
+            if (a1, b1) == (a2, b2) =>
+        {
+            StaticResult::Scalar
+        }
+        _ => StaticResult::Unknown,
+    }
+}
+
 fn static_analysis_index(_args: &[Node]) -> StaticResult {
     // INDEX has two forms, but they are indistinguishable at parse time.
     StaticResult::Unknown
@@ -1712,7 +1733,7 @@ fn static_analysis_on_function(kind: &Function, args: &[Node]) -> StaticResult {
         Function::Vstack => StaticResult::Unknown,
         Function::Wrapcols => StaticResult::Unknown,
         Function::Wraprows => StaticResult::Unknown,
-        Function::Xlookup => not_implemented(args),
+        Function::Xlookup => static_analysis_xlookup(args),
         Function::Xmatch => not_implemented(args),
         Function::Trimrange => StaticResult::Unknown,
         Function::Sort => StaticResult::Unknown,

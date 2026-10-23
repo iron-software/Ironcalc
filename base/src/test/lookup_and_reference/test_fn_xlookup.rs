@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use crate::test::util::new_empty_model;
+use crate::types::{ArrayKind, Cell};
 
 /// A model with A1:A3 = 1, 2, 3 and B1:B3 = a, b, c.
 fn model_with_table() -> crate::Model<'static> {
@@ -12,6 +13,14 @@ fn model_with_table() -> crate::Model<'static> {
     model._set("B2", "b");
     model._set("B3", "c");
     model
+}
+
+/// The texts of G1, H1, and G2 after `formula` is written to G1 of `model_with_table`.
+fn spill(formula: &str) -> [String; 3] {
+    let mut model = model_with_table();
+    model._set("G1", formula);
+    model.evaluate();
+    ["G1", "H1", "G2"].map(|cell| model._get_text(cell))
 }
 
 fn xlookup(formula: &str) -> String {
@@ -265,8 +274,19 @@ fn single_item_array_and_one_cell_reference() {
 }
 
 #[test]
+fn one_cell_reference_and_a_column_of_two_cells() {
+    assert_eq!(spill("=XLOOKUP(2,A2,B1:B2)"), ["a", "", "b"]);
+}
+
+#[test]
+fn one_cell_reference_and_a_row_of_two_cells() {
+    // Excel shows 0 for an empty cell that a formula spills.
+    assert_eq!(spill("=XLOOKUP(2,A2,B2:C2)"), ["b", "0", ""]);
+}
+
+#[test]
 fn one_cell_reference_and_range_of_another_size() {
-    assert_eq!(xlookup("=XLOOKUP(2,A2,B1:B2)"), "#VALUE!");
+    assert_eq!(xlookup("=XLOOKUP(2,A2,B1:C2)"), "#VALUE!");
 }
 
 #[test]
@@ -306,4 +326,152 @@ fn one_cell_reference_into_a_later_spill_area() {
     assert_eq!(model._get_text("F2"), "2");
     assert_eq!(model._get_text("D1"), "hit1");
     assert_eq!(model._get_text("E1"), "hit2");
+}
+
+// ── a return array with more columns or rows gives a whole row or column ──────
+
+#[test]
+fn wider_return_range_gives_the_matching_row() {
+    assert_eq!(spill("=XLOOKUP(2,A1:A3,A1:B3)"), ["2", "b", ""]);
+}
+
+#[test]
+fn wider_return_range_and_a_lookup_in_its_second_column() {
+    assert_eq!(spill("=XLOOKUP(\"b\",B1:B3,A1:B3)"), ["2", "b", ""]);
+}
+
+#[test]
+fn a_formula_reads_the_spilled_row() {
+    let mut model = model_with_table();
+    model._set("G1", "=XLOOKUP(2,A1:A3,A1:B3)");
+    model._set("J1", "=H1");
+    model.evaluate();
+    assert_eq!(model._get_text("J1"), "b");
+}
+
+#[test]
+fn spilled_row_follows_a_change_of_the_return_range() {
+    let mut model = model_with_table();
+    model._set("G1", "=XLOOKUP(2,A1:A3,A1:B3)");
+    model.evaluate();
+    model._set("B2", "new");
+    model.evaluate();
+    assert_eq!(model._get_text("H1"), "new");
+}
+
+#[test]
+fn wider_return_range_inside_a_function() {
+    assert_eq!(xlookup("=COUNTA(XLOOKUP(2,A1:A3,A1:B3))"), "2");
+}
+
+#[test]
+fn taller_return_range_gives_the_matching_column() {
+    let mut model = new_empty_model();
+    model._set("A1", "1");
+    model._set("B1", "2");
+    model._set("C1", "3");
+    model._set("A2", "a");
+    model._set("B2", "b");
+    model._set("C2", "c");
+    model._set("G1", "=XLOOKUP(2,A1:C1,A1:C2)");
+    model.evaluate();
+    assert_eq!(model._get_text("G1"), "2");
+    assert_eq!(model._get_text("G2"), "b");
+    assert_eq!(model._get_text("H1"), "");
+}
+
+#[test]
+fn taller_return_array_gives_the_matching_column() {
+    assert_eq!(
+        spill("=XLOOKUP(2,{1,2,3},{\"a\",\"b\",\"c\";\"x\",\"y\",\"z\"})"),
+        ["b", "", "y"]
+    );
+}
+
+#[test]
+fn wider_return_array_gives_the_matching_row() {
+    assert_eq!(
+        spill("=XLOOKUP(2,{1;2;3},{\"a\",\"x\";\"b\",\"y\";\"c\",\"z\"})"),
+        ["b", "y", ""]
+    );
+}
+
+#[test]
+fn wider_return_range_over_whole_columns() {
+    assert_eq!(spill("=XLOOKUP(3,A:A,A:B)"), ["3", "c", ""]);
+}
+
+#[test]
+fn wider_return_range_of_another_length() {
+    assert_eq!(xlookup("=XLOOKUP(2,A1:A3,A1:B2)"), "#VALUE!");
+}
+
+#[test]
+fn wider_return_array_of_another_length() {
+    assert_eq!(
+        xlookup("=XLOOKUP(2,{1;2;3},{\"a\",\"x\";\"b\",\"y\"})"),
+        "#VALUE!"
+    );
+}
+
+#[test]
+fn wider_return_range_not_found() {
+    assert_eq!(spill("=XLOOKUP(9,A1:A3,A1:B3)"), ["#N/A", "", ""]);
+}
+
+#[test]
+fn wider_return_range_if_not_found() {
+    assert_eq!(spill("=XLOOKUP(9,A1:A3,A1:B3,\"none\")"), ["none", "", ""]);
+}
+
+#[test]
+fn wider_return_range_reverse_search() {
+    assert_eq!(spill("=XLOOKUP(2,A1:A3,A1:B3,,0,-1)"), ["2", "b", ""]);
+}
+
+#[test]
+fn wider_return_range_binary_search() {
+    assert_eq!(spill("=XLOOKUP(2,A1:A3,A1:B3,,0,2)"), ["2", "b", ""]);
+}
+
+#[test]
+fn wider_return_range_next_smaller() {
+    assert_eq!(spill("=XLOOKUP(2.5,A1:A3,A1:B3,,-1)"), ["2", "b", ""]);
+}
+
+#[test]
+fn wider_return_range_wildcard() {
+    assert_eq!(spill("=XLOOKUP(\"b*\",B1:B3,A1:B3,,2)"), ["2", "b", ""]);
+}
+
+// ── static analysis: only a wider return array makes a dynamic formula ───────
+
+fn is_dynamic(formula: &str) -> bool {
+    let mut model = model_with_table();
+    model._set("G1", formula);
+    matches!(
+        model._get_cell("G1"),
+        Cell::ArrayFormula {
+            kind: ArrayKind::Dynamic,
+            ..
+        }
+    )
+}
+
+#[test]
+fn same_shape_return_array_is_a_plain_formula() {
+    assert!(!is_dynamic("=XLOOKUP(2,A1:A3,B1:B3)"));
+    assert!(!is_dynamic("=XLOOKUP(2,A2,B2)"));
+    assert!(!is_dynamic("=XLOOKUP(2,{1,2,3},{\"a\",\"b\",\"c\"})"));
+    assert!(!is_dynamic("=XLOOKUP(2,A1:A3)"));
+}
+
+#[test]
+fn wider_return_array_is_a_dynamic_formula() {
+    assert!(is_dynamic("=XLOOKUP(2,A1:A3,A1:B3)"));
+    assert!(is_dynamic("=XLOOKUP(2,A2,B2:C2)"));
+    assert!(is_dynamic(
+        "=XLOOKUP(2,{1,2,3},{\"a\",\"b\",\"c\";\"x\",\"y\",\"z\"})"
+    ));
+    assert!(is_dynamic("=XLOOKUP(2,SEQUENCE(3),B1:B3)"));
 }
