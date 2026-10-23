@@ -121,6 +121,26 @@ fn linear_search(
     None
 }
 
+/// How XLOOKUP reads the return array: by rows for a lookup column, by columns for a lookup row.
+#[derive(Clone, Copy, PartialEq)]
+enum Direction {
+    Vertical,
+    Horizontal,
+}
+
+/// The direction in which a return array of shape `result` matches a lookup array of shape `lookup`.
+/// A lookup column needs the same number of rows; a lookup row needs the same number of columns.
+/// A lookup array of one cell is both: vertical comes first.
+fn lookup_direction(lookup: (i32, i32), result: (i32, i32)) -> Option<Direction> {
+    if lookup.1 == 1 && result.0 == lookup.0 {
+        Some(Direction::Vertical)
+    } else if lookup.0 == 1 && result.1 == lookup.1 {
+        Some(Direction::Horizontal)
+    } else {
+        None
+    }
+}
+
 /// A row or a column that XLOOKUP reads: a range reference or an array value.
 enum LookupVector {
     Range {
@@ -154,8 +174,9 @@ impl<'a> Model<'a> {
     /// to the first match it finds. If no match exists, then XLOOKUP can return the closest (approximate) match.
     /// =XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found], [match_mode], [search_mode])
     ///
-    /// lookup_array and return_array must be column or row arrays and of the same dimension.
-    /// Otherwise #VALUE! is returned
+    /// lookup_array must be a column or a row array. return_array must have the same number of rows
+    /// (for a column) or of columns (for a row). Otherwise #VALUE! is returned.
+    /// A return_array with more columns (or rows) gives the whole matching row (or column), which spills.
     /// [if_not_found]
     /// Where a valid match is not found, return the [if_not_found] text you supply.
     /// If a valid match is not found, and [if_not_found] is missing, #N/A is returned.
@@ -277,7 +298,7 @@ impl<'a> Model<'a> {
                 }
             }
         };
-        // return array: a range or an array value with the shape of lookup_array
+        // return array: a range or an array value with the length of lookup_array
         let result = match self.evaluate_lookup_vector_node(&args[2], cell) {
             CalcResult::Range { left, right } => LookupVector::Range { left, right },
             CalcResult::Array(rows) => LookupVector::Array(rows),
@@ -290,13 +311,16 @@ impl<'a> Model<'a> {
                 }
             }
         };
-        if result.shape() != lookup.shape() {
-            return CalcResult::Error {
-                error: Error::VALUE,
-                origin: cell,
-                message: "Arrays must be of the same size".to_string(),
-            };
-        }
+        let direction = match lookup_direction(lookup.shape(), result.shape()) {
+            Some(direction) => direction,
+            None => {
+                return CalcResult::Error {
+                    error: Error::VALUE,
+                    origin: cell,
+                    message: "Arrays must be of the same size".to_string(),
+                };
+            }
+        };
         let array = match self.lookup_vector_values(lookup, cell) {
             Ok(array) => array,
             Err(error) => return error,
@@ -334,7 +358,7 @@ impl<'a> Model<'a> {
             }
         };
         match index {
-            Some(index) => self.lookup_vector_item(result, index, cell),
+            Some(index) => self.lookup_vector_item(result, direction, index, cell),
             None => if_not_found,
         }
     }
@@ -372,31 +396,49 @@ impl<'a> Model<'a> {
         }
     }
 
-    /// Reads the item at `index` of a lookup vector.
+    /// Reads the row (vertical) or the column (horizontal) at `index` of a return array.
+    /// One cell gives its value. More cells give a range or an array, which spills.
     fn lookup_vector_item(
         &mut self,
         vector: LookupVector,
+        direction: Direction,
         index: usize,
         cell: CellReferenceIndex,
     ) -> CalcResult {
+        let offset = index as i32;
         match vector {
             LookupVector::Range { left, right } => {
-                let is_column = left.row != right.row;
-                let offset = index as i32;
-                self.evaluate_cell(CellReferenceIndex {
-                    sheet: left.sheet,
-                    row: left.row + if is_column { offset } else { 0 },
-                    column: left.column + if is_column { 0 } else { offset },
-                })
+                let (left, right) = if direction == Direction::Vertical {
+                    let row = left.row + offset;
+                    (
+                        CellReferenceIndex { row, ..left },
+                        CellReferenceIndex { row, ..right },
+                    )
+                } else {
+                    let column = left.column + offset;
+                    (
+                        CellReferenceIndex { column, ..left },
+                        CellReferenceIndex { column, ..right },
+                    )
+                };
+                if left == right {
+                    self.evaluate_cell(left)
+                } else {
+                    CalcResult::Range { left, right }
+                }
             }
             LookupVector::Array(rows) => {
-                // The shape check makes `index` valid for a single row or a single column.
-                let node = if rows.len() == 1 {
-                    &rows[0][index]
+                // The direction check makes `index` valid for each row or each column.
+                let items: Vec<Vec<ArrayNode>> = if direction == Direction::Vertical {
+                    vec![rows[index].clone()]
                 } else {
-                    &rows[index][0]
+                    rows.iter().map(|row| vec![row[index].clone()]).collect()
                 };
-                array_node_to_calc_result(node, cell)
+                if items.len() == 1 && items[0].len() == 1 {
+                    array_node_to_calc_result(&items[0][0], cell)
+                } else {
+                    CalcResult::Array(items)
+                }
             }
         }
     }
