@@ -135,6 +135,24 @@ fn binary_search_descending_next_larger() {
 }
 
 #[test]
+fn search_mode_zero_over_arrays() {
+    assert_eq!(
+        xlookup("=XLOOKUP(2,{1,2,3},{\"a\",\"b\",\"c\"},,0,0)"),
+        "#VALUE!"
+    );
+}
+
+#[test]
+fn search_mode_zero_over_ranges() {
+    assert_eq!(xlookup("=XLOOKUP(2,A1:A3,B1:B3,,0,0)"), "#VALUE!");
+}
+
+#[test]
+fn search_mode_three_over_ranges() {
+    assert_eq!(xlookup("=XLOOKUP(2,A1:A3,B1:B3,,0,3)"), "#VALUE!");
+}
+
+#[test]
 fn binary_search_with_wildcard() {
     assert_eq!(
         xlookup("=XLOOKUP(2,{1,2,3},{\"a\",\"b\",\"c\"},,2,2)"),
@@ -201,7 +219,12 @@ fn whole_column_ranges() {
 
 #[test]
 fn two_dimensional_range() {
-    assert_eq!(xlookup("=XLOOKUP(2,A1:B3,B1:B3)"), "#ERROR!");
+    assert_eq!(xlookup("=XLOOKUP(2,A1:B3,B1:B3)"), "#VALUE!");
+}
+
+#[test]
+fn two_dimensional_whole_column_range() {
+    assert_eq!(xlookup("=XLOOKUP(2,A:B,B:B)"), "#VALUE!");
 }
 
 #[test]

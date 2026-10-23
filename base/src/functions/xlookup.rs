@@ -232,7 +232,7 @@ impl<'a> Model<'a> {
                     2 => SearchMode::BinarySearchAscending,
                     _ => {
                         return CalcResult::Error {
-                            error: Error::ERROR,
+                            error: Error::VALUE,
                             origin: cell,
                             message: "Unexpected number".to_string(),
                         };
@@ -250,7 +250,7 @@ impl<'a> Model<'a> {
                 if left.row != right.row && left.column != right.column {
                     // second argument must be a vector
                     return CalcResult::Error {
-                        error: Error::ERROR,
+                        error: Error::VALUE,
                         origin: cell,
                         message: "Second argument must be a vector".to_string(),
                     };
