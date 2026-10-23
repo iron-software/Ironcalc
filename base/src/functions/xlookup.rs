@@ -3,7 +3,10 @@ use crate::expressions::parser::ArrayNode;
 use crate::expressions::types::CellReferenceIndex;
 use crate::worksheet::WorksheetDimension;
 use crate::{
-    calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
+    calc_result::CalcResult,
+    expressions::parser::Node,
+    expressions::token::Error,
+    model::{CellOrRange, Model},
 };
 
 use super::{
@@ -245,7 +248,7 @@ impl<'a> Model<'a> {
             SearchMode::StartAtFirstItem
         };
         // lookup_array: a range or an array value, as one row or one column
-        let lookup = match self.evaluate_node_in_context(&args[1], cell) {
+        let lookup = match self.evaluate_lookup_vector_node(&args[1], cell) {
             CalcResult::Range { left, right } => {
                 if left.row != right.row && left.column != right.column {
                     // second argument must be a vector
@@ -278,7 +281,7 @@ impl<'a> Model<'a> {
             }
         };
         // return array: a range or an array value with the shape of lookup_array
-        let result = match self.evaluate_node_in_context(&args[2], cell) {
+        let result = match self.evaluate_lookup_vector_node(&args[2], cell) {
             CalcResult::Range { left, right } => LookupVector::Range { left, right },
             CalcResult::Array(rows) => LookupVector::Array(rows),
             error @ CalcResult::Error { .. } => return error,
@@ -341,6 +344,23 @@ impl<'a> Model<'a> {
 
     /// Reads all the values of a lookup vector, in order.
     /// A range of a whole column or a whole row stops at the used range of its sheet.
+    // A one-cell reference is a range of one cell, as in Excel, not the value of the cell
+    fn evaluate_lookup_vector_node(&mut self, node: &Node, cell: CellReferenceIndex) -> CalcResult {
+        match node {
+            Node::ReferenceKind { .. } => {
+                let range = self.evaluate_node_with_reference(node, cell);
+                if let CalcResult::Range { left, .. } = &range {
+                    self.support
+                        .entry(cell)
+                        .or_default()
+                        .push(CellOrRange::Cell((left.sheet, left.row, left.column)));
+                }
+                range
+            }
+            _ => self.evaluate_node_in_context(node, cell),
+        }
+    }
+
     fn lookup_vector_values(
         &mut self,
         vector: LookupVector,

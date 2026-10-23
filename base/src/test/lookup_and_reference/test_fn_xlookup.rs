@@ -231,3 +231,79 @@ fn two_dimensional_whole_column_range() {
 fn ranges_of_another_size() {
     assert_eq!(xlookup("=XLOOKUP(2,A1:A3,B1:B2)"), "#VALUE!");
 }
+
+// ── a one-cell reference is a vector of one item ─────────────────────────────
+
+#[test]
+fn one_cell_references() {
+    assert_eq!(xlookup("=XLOOKUP(2,A2,B2)"), "b");
+}
+
+#[test]
+fn one_cell_references_not_found() {
+    assert_eq!(xlookup("=XLOOKUP(9,A2,B2)"), "#N/A");
+}
+
+#[test]
+fn one_cell_references_if_not_found() {
+    assert_eq!(xlookup("=XLOOKUP(9,A2,B2,\"none\")"), "none");
+}
+
+#[test]
+fn absolute_one_cell_references() {
+    assert_eq!(xlookup("=XLOOKUP(2,$A$2,$B$2)"), "b");
+}
+
+#[test]
+fn one_cell_reference_and_single_item_array() {
+    assert_eq!(xlookup("=XLOOKUP(2,A2,{\"only\"})"), "only");
+}
+
+#[test]
+fn single_item_array_and_one_cell_reference() {
+    assert_eq!(xlookup("=XLOOKUP(2,{2},B2)"), "b");
+}
+
+#[test]
+fn one_cell_reference_and_range_of_another_size() {
+    assert_eq!(xlookup("=XLOOKUP(2,A2,B1:B2)"), "#VALUE!");
+}
+
+#[test]
+fn one_cell_reference_to_an_empty_cell() {
+    assert_eq!(xlookup("=XLOOKUP(2,C2,B2)"), "#N/A");
+}
+
+#[test]
+fn one_cell_references_to_another_sheet() {
+    let mut model = model_with_table();
+    model.new_sheet();
+    model._set("Sheet2!A2", "2");
+    model._set("Sheet2!B2", "other");
+    model._set("D1", "=XLOOKUP(2,Sheet2!A2,Sheet2!B2)");
+    model.evaluate();
+    assert_eq!(model._get_text("D1"), "other");
+}
+
+#[test]
+fn one_cell_reference_follows_a_change_of_the_cell() {
+    let mut model = model_with_table();
+    model._set("D1", "=XLOOKUP(2,A2,B2)");
+    model.evaluate();
+    model._set("B2", "new");
+    model.evaluate();
+    assert_eq!(model._get_text("D1"), "new");
+}
+
+// D1 spills into D1:E1 and reads F2. F1 spills into F1:F2 after D1 in natural order.
+// The one-cell reference F2 is a precedent of D1, so D1 moves after F1.
+#[test]
+fn one_cell_reference_into_a_later_spill_area() {
+    let mut model = new_empty_model();
+    model._set("D1", "=XLOOKUP(2,F2,{\"hit\"})&{\"1\",\"2\"}");
+    model._set("F1", "=SEQUENCE(2)");
+    model.evaluate();
+    assert_eq!(model._get_text("F2"), "2");
+    assert_eq!(model._get_text("D1"), "hit1");
+    assert_eq!(model._get_text("E1"), "hit2");
+}
