@@ -8,6 +8,7 @@ mod test_cell_clear_contents;
 mod test_circular_references;
 mod test_column_width;
 mod test_criteria;
+mod test_criteria_not_equal_text;
 mod test_criteria_white_space;
 mod test_database;
 mod test_date_1904;

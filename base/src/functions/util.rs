@@ -278,6 +278,7 @@ fn result_is_equal_to_string(calc_result: &CalcResult, target: &str) -> bool {
     }
 }
 
+// IronXL: a value that is not a string (a number, a Boolean, an error, or an empty cell) is not equal to the text.
 fn result_is_not_equal_to_string(calc_result: &CalcResult, target: &str) -> bool {
     match calc_result {
         CalcResult::String(s) => {
@@ -286,7 +287,7 @@ fn result_is_not_equal_to_string(calc_result: &CalcResult, target: &str) -> bool
             }
             false
         }
-        _ => false,
+        _ => true,
     }
 }
 
