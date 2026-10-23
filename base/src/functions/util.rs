@@ -384,96 +384,7 @@ pub(crate) fn build_criteria_with_date_system<'a>(
     date_system: DateSystem,
 ) -> Box<dyn Fn(&CalcResult) -> bool + 'a> {
     match value {
-        CalcResult::String(s) => {
-            if let Some(v) = s.strip_prefix("<=") {
-                // TODO: I am not implementing <= ERROR or <= BOOLEAN
-                if let Ok(f) = v.parse::<f64>() {
-                    Box::new(move |x| result_is_less_or_equal_than_number(x, f))
-                } else if v.is_empty() {
-                    Box::new(move |_x| false)
-                } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
-                    Box::new(move |x| result_is_less_or_equal_than_number(x, f))
-                } else {
-                    Box::new(move |x| result_is_less_or_equal_than_string(x, &v.to_lowercase()))
-                }
-            } else if let Some(v) = s.strip_prefix(">=") {
-                // TODO: I am not implementing >= ERROR or >= BOOLEAN
-                if let Ok(f) = v.parse::<f64>() {
-                    Box::new(move |x| result_is_greater_or_equal_than_number(x, f))
-                } else if v.is_empty() {
-                    Box::new(move |_x| false)
-                } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
-                    Box::new(move |x| result_is_greater_or_equal_than_number(x, f))
-                } else {
-                    Box::new(move |x| result_is_greater_or_equal_than_string(x, &v.to_lowercase()))
-                }
-            } else if let Some(v) = s.strip_prefix("<>") {
-                if let Ok(f) = v.parse::<f64>() {
-                    Box::new(move |x| result_is_not_equal_to_number(x, f))
-                } else if let Ok(b) = v.to_lowercase().parse::<bool>() {
-                    Box::new(move |x| result_is_not_equal_to_bool(x, b))
-                } else if is_english_error_string(v) {
-                    Box::new(move |x| result_is_not_equal_to_error(x, v))
-                } else if v.contains('*') || v.contains('?') {
-                    if let Ok(reg) = from_wildcard_to_regex(&v.to_lowercase(), true) {
-                        Box::new(move |x| !result_matches_regex(x, &reg))
-                    } else {
-                        Box::new(move |_| false)
-                    }
-                } else if v.is_empty() {
-                    Box::new(result_is_not_equal_to_empty)
-                } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
-                    Box::new(move |x| result_is_not_equal_to_number(x, f))
-                } else {
-                    Box::new(move |x| result_is_not_equal_to_string(x, &v.to_lowercase()))
-                }
-            } else if let Some(v) = s.strip_prefix('<') {
-                // TODO: I am not implementing < ERROR or < BOOLEAN
-                if let Ok(f) = v.parse::<f64>() {
-                    Box::new(move |x| result_is_less_than_number(x, f))
-                } else if v.is_empty() {
-                    Box::new(move |_x| false)
-                } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
-                    Box::new(move |x| result_is_less_than_number(x, f))
-                } else {
-                    Box::new(move |x| result_is_less_than_string(x, &v.to_lowercase()))
-                }
-            } else if let Some(v) = s.strip_prefix('>') {
-                // TODO: I am not implementing > ERROR or > BOOLEAN
-                if let Ok(f) = v.parse::<f64>() {
-                    Box::new(move |x| result_is_greater_than_number(x, f))
-                } else if v.is_empty() {
-                    Box::new(move |_x| false)
-                } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
-                    Box::new(move |x| result_is_greater_than_number(x, f))
-                } else {
-                    Box::new(move |x| result_is_greater_than_string(x, &v.to_lowercase()))
-                }
-            } else {
-                let v = if let Some(a) = s.strip_prefix('=') {
-                    a
-                } else {
-                    s
-                };
-                if let Ok(f) = v.parse::<f64>() {
-                    Box::new(move |x| result_is_equal_to_number(x, f))
-                } else if let Ok(b) = v.to_lowercase().parse::<bool>() {
-                    Box::new(move |x| result_is_equal_to_bool(x, b))
-                } else if is_english_error_string(v) {
-                    Box::new(move |x| result_is_equal_to_error(x, v))
-                } else if v.contains('*') || v.contains('?') {
-                    if let Ok(reg) = from_wildcard_to_regex(&v.to_lowercase(), true) {
-                        Box::new(move |x| result_matches_regex(x, &reg))
-                    } else {
-                        Box::new(move |_| false)
-                    }
-                } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
-                    Box::new(move |x| result_is_equal_to_number(x, f))
-                } else {
-                    Box::new(move |x| result_is_equal_to_string(x, &v.to_lowercase()))
-                }
-            }
-        }
+        CalcResult::String(s) => build_text_criteria(s, locale, date_system),
         CalcResult::Number(target) => Box::new(move |x| result_is_equal_to_number(x, *target)),
         CalcResult::Boolean(b) => Box::new(move |x| result_is_equal_to_bool(x, *b)),
         CalcResult::Error { error, .. } => {
@@ -483,5 +394,114 @@ pub(crate) fn build_criteria_with_date_system<'a>(
         CalcResult::Range { left: _, right: _ } => Box::new(move |_x| false),
         CalcResult::Array(_) | CalcResult::Lambda(_) => Box::new(move |_x| false),
         CalcResult::EmptyCell | CalcResult::EmptyArg => Box::new(result_is_equal_to_empty),
+    }
+}
+
+/// IronXL: the criterion of a criteria text, by the rules of `build_criteria_with_date_system`. The white space after
+/// an operator (`=`, `<>`, `<`, `>`, `<=`, `>=`) does not count, so `"> 1000"` compares with the number 1000, as in Excel.
+pub(crate) fn build_text_criteria<'a>(
+    s: &'a str,
+    locale: &'a Locale,
+    date_system: DateSystem,
+) -> Box<dyn Fn(&CalcResult) -> bool + 'a> {
+    if let Some(v) = s.strip_prefix("<=") {
+        // Excel reads the text after the operator without its leading white space.
+        let v = v.trim_start();
+        // TODO: I am not implementing <= ERROR or <= BOOLEAN
+        if let Ok(f) = v.parse::<f64>() {
+            Box::new(move |x| result_is_less_or_equal_than_number(x, f))
+        } else if v.is_empty() {
+            Box::new(move |_x| false)
+        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+            Box::new(move |x| result_is_less_or_equal_than_number(x, f))
+        } else {
+            Box::new(move |x| result_is_less_or_equal_than_string(x, &v.to_lowercase()))
+        }
+    } else if let Some(v) = s.strip_prefix(">=") {
+        // Excel reads the text after the operator without its leading white space.
+        let v = v.trim_start();
+        // TODO: I am not implementing >= ERROR or >= BOOLEAN
+        if let Ok(f) = v.parse::<f64>() {
+            Box::new(move |x| result_is_greater_or_equal_than_number(x, f))
+        } else if v.is_empty() {
+            Box::new(move |_x| false)
+        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+            Box::new(move |x| result_is_greater_or_equal_than_number(x, f))
+        } else {
+            Box::new(move |x| result_is_greater_or_equal_than_string(x, &v.to_lowercase()))
+        }
+    } else if let Some(v) = s.strip_prefix("<>") {
+        // Excel reads the text after the operator without its leading white space.
+        let v = v.trim_start();
+        if let Ok(f) = v.parse::<f64>() {
+            Box::new(move |x| result_is_not_equal_to_number(x, f))
+        } else if let Ok(b) = v.to_lowercase().parse::<bool>() {
+            Box::new(move |x| result_is_not_equal_to_bool(x, b))
+        } else if is_english_error_string(v) {
+            Box::new(move |x| result_is_not_equal_to_error(x, v))
+        } else if v.contains('*') || v.contains('?') {
+            if let Ok(reg) = from_wildcard_to_regex(&v.to_lowercase(), true) {
+                Box::new(move |x| !result_matches_regex(x, &reg))
+            } else {
+                Box::new(move |_| false)
+            }
+        } else if v.is_empty() {
+            Box::new(result_is_not_equal_to_empty)
+        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+            Box::new(move |x| result_is_not_equal_to_number(x, f))
+        } else {
+            Box::new(move |x| result_is_not_equal_to_string(x, &v.to_lowercase()))
+        }
+    } else if let Some(v) = s.strip_prefix('<') {
+        // Excel reads the text after the operator without its leading white space.
+        let v = v.trim_start();
+        // TODO: I am not implementing < ERROR or < BOOLEAN
+        if let Ok(f) = v.parse::<f64>() {
+            Box::new(move |x| result_is_less_than_number(x, f))
+        } else if v.is_empty() {
+            Box::new(move |_x| false)
+        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+            Box::new(move |x| result_is_less_than_number(x, f))
+        } else {
+            Box::new(move |x| result_is_less_than_string(x, &v.to_lowercase()))
+        }
+    } else if let Some(v) = s.strip_prefix('>') {
+        // Excel reads the text after the operator without its leading white space.
+        let v = v.trim_start();
+        // TODO: I am not implementing > ERROR or > BOOLEAN
+        if let Ok(f) = v.parse::<f64>() {
+            Box::new(move |x| result_is_greater_than_number(x, f))
+        } else if v.is_empty() {
+            Box::new(move |_x| false)
+        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+            Box::new(move |x| result_is_greater_than_number(x, f))
+        } else {
+            Box::new(move |x| result_is_greater_than_string(x, &v.to_lowercase()))
+        }
+    } else {
+        // A text without an operator keeps its white space. After `=`, Excel reads the text without its leading
+        // white space.
+        let v = if let Some(a) = s.strip_prefix('=') {
+            a.trim_start()
+        } else {
+            s
+        };
+        if let Ok(f) = v.parse::<f64>() {
+            Box::new(move |x| result_is_equal_to_number(x, f))
+        } else if let Ok(b) = v.to_lowercase().parse::<bool>() {
+            Box::new(move |x| result_is_equal_to_bool(x, b))
+        } else if is_english_error_string(v) {
+            Box::new(move |x| result_is_equal_to_error(x, v))
+        } else if v.contains('*') || v.contains('?') {
+            if let Ok(reg) = from_wildcard_to_regex(&v.to_lowercase(), true) {
+                Box::new(move |x| result_matches_regex(x, &reg))
+            } else {
+                Box::new(move |_| false)
+            }
+        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+            Box::new(move |x| result_is_equal_to_number(x, f))
+        } else {
+            Box::new(move |x| result_is_equal_to_string(x, &v.to_lowercase()))
+        }
     }
 }
