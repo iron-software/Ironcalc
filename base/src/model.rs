@@ -225,7 +225,10 @@ pub struct Model<'a> {
     /// The list of cells that might spill
     pub(crate) spill_cells: Vec<CellReferenceIndex>,
     /// A dictionary to keep track of which cells or ranges support a given cell.
+    /// IronXL: only the first phase of [`Model::evaluate()`] records and reads it, so it is empty at other times.
     pub(crate) support: HashMap<CellReferenceIndex, Vec<CellOrRange>>,
+    /// IronXL: true while the first phase of [`Model::evaluate()`] runs, the only time that `support` gets records.
+    pub(crate) recording_support: bool,
     /// Evaluated CF results per cell, keyed by (sheet_index, row, column).
     /// Rebuilt from scratch on every call to evaluate_conditional_formatting().
     pub(crate) cf_cache: HashMap<(u32, i32, i32), Vec<CfCellResult>>,
@@ -584,10 +587,7 @@ impl<'a> Model<'a> {
                 if !absolute_column {
                     column1 += cell.column;
                 }
-                self.support
-                    .entry(cell)
-                    .or_default()
-                    .push(CellOrRange::Cell((*sheet_index, row1, column1)));
+                self.record_support(cell, CellOrRange::Cell((*sheet_index, row1, column1)));
                 self.evaluate_cell(CellReferenceIndex {
                     sheet: *sheet_index,
                     row: row1,
@@ -633,16 +633,16 @@ impl<'a> Model<'a> {
                 } else {
                     *column2 + cell.column
                 };
-                self.support
-                    .entry(cell)
-                    .or_default()
-                    .push(CellOrRange::Range((
+                self.record_support(
+                    cell,
+                    CellOrRange::Range((
                         *sheet_index,
                         r1.min(r2),
                         c1.min(c2),
                         r1.max(r2),
                         c1.max(c2),
-                    )));
+                    )),
+                );
                 CalcResult::Range {
                     left: CellReferenceIndex {
                         sheet: *sheet_index,
@@ -1727,6 +1727,7 @@ impl<'a> Model<'a> {
             last_lambda_id: 0,
             spill_cells: Vec::new(),
             support: HashMap::new(),
+            recording_support: false,
             cf_cache: HashMap::new(),
             date_system: DateSystem::default(),
         };
@@ -3004,6 +3005,13 @@ impl<'a> Model<'a> {
             .collect()
     }
 
+    /// IronXL: records that `support` supports `cell`, while the first phase of [`Model::evaluate()`] runs.
+    pub(crate) fn record_support(&mut self, cell: CellReferenceIndex, support: CellOrRange) {
+        if self.recording_support {
+            self.support.entry(cell).or_default().push(support);
+        }
+    }
+
     /// Returns true if any position in `positions` falls within a dependency of `cell`.
     fn position_in_support(
         &self,
@@ -3059,6 +3067,7 @@ impl<'a> Model<'a> {
         let mut retry = true;
         let mut restart_count = 0;
 
+        self.recording_support = true;
         while retry && restart_count < max_restarts {
             retry = false;
             self.cells.clear();
@@ -3091,6 +3100,10 @@ impl<'a> Model<'a> {
                 }
             }
         }
+
+        // IronXL: only phase 1 reads the support of a cell, so phase 2 records none, and the records go.
+        self.recording_support = false;
+        self.support = HashMap::new();
 
         // Phase 2: evaluate everything else; spill cells are already Evaluated and skipped.
         // Fallback when max restarts is exceeded (circular spill dependency).
@@ -3129,11 +3142,10 @@ impl<'a> Model<'a> {
         }
         self.clear_variable_stack();
         self.clear_lambdas();
+        // IronXL: the states of the cells grow once, and no support record is made: only `evaluate` reads them.
+        self.cells.reserve(cells.len());
         for &(sheet, row, column) in cells {
             self.cells.remove(&(sheet, row, column));
-            // Each evaluation records the support of a cell again, so drop the old record.
-            self.support
-                .remove(&CellReferenceIndex { sheet, row, column });
         }
         let mut walk = PrecedentWalk::default();
         for &(sheet, row, column) in cells {
