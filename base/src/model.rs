@@ -195,6 +195,9 @@ pub struct Model<'a> {
     pub workbook: Workbook,
     /// A list of parsed formulas
     pub parsed_formulas: Vec<Vec<(Node, StaticResult)>>,
+    /// For each sheet, the index of each shared formula text (runtime only).
+    /// It makes the search for an equal formula independent of the formula count.
+    pub(crate) shared_formula_indexes: Vec<HashMap<String, i32>>,
     /// A list of parsed defined names
     pub(crate) parsed_defined_names: HashMap<(Option<u32>, String), ParsedDefinedName>,
     /// An optimization to lookup strings faster
@@ -1709,6 +1712,7 @@ impl<'a> Model<'a> {
         let mut model = Model {
             workbook,
             parsed_formulas,
+            shared_formula_indexes: Vec::new(),
             shared_strings,
             parsed_defined_names: HashMap::new(),
             parser,
@@ -2590,15 +2594,16 @@ impl<'a> Model<'a> {
         let is_dynamic = !matches!(static_result, StaticResult::Scalar);
 
         let s = to_rc_format(&parsed_formula);
-        let mut formula_index: i32 = -1;
-        if let Some(index) = shared_formulas.iter().position(|x| x == &s) {
-            formula_index = index as i32;
-        }
-        if formula_index == -1 {
-            shared_formulas.push(s);
-            self.parsed_formulas[sheet as usize].push((parsed_formula, static_result));
-            formula_index = (shared_formulas.len() as i32) - 1;
-        }
+        let formula_index = match self.shared_formula_indexes[sheet as usize].get(&s) {
+            Some(index) => *index,
+            None => {
+                let index = shared_formulas.len() as i32;
+                self.shared_formula_indexes[sheet as usize].insert(s.clone(), index);
+                shared_formulas.push(s);
+                self.parsed_formulas[sheet as usize].push((parsed_formula, static_result));
+                index
+            }
+        };
         if is_dynamic {
             worksheet.set_cell_with_dynamic_formula(row, column, formula_index, style, 1, 1)?;
         } else {
@@ -2639,15 +2644,16 @@ impl<'a> Model<'a> {
         let static_result = run_static_analysis_on_node(&parsed_formula);
 
         let s = to_rc_format(&parsed_formula);
-        let mut formula_index: i32 = -1;
-        if let Some(index) = shared_formulas.iter().position(|x| x == &s) {
-            formula_index = index as i32;
-        }
-        if formula_index == -1 {
-            shared_formulas.push(s);
-            self.parsed_formulas[sheet as usize].push((parsed_formula, static_result));
-            formula_index = (shared_formulas.len() as i32) - 1;
-        }
+        let formula_index = match self.shared_formula_indexes[sheet as usize].get(&s) {
+            Some(index) => *index,
+            None => {
+                let index = shared_formulas.len() as i32;
+                self.shared_formula_indexes[sheet as usize].insert(s.clone(), index);
+                shared_formulas.push(s);
+                self.parsed_formulas[sheet as usize].push((parsed_formula, static_result));
+                index
+            }
+        };
         worksheet.set_cell_with_array_formula(row, column, formula_index, style, width, height)?;
         Ok(formula_index)
     }

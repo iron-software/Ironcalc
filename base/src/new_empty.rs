@@ -104,12 +104,16 @@ impl<'a> Model<'a> {
                 column: 1,
             };
             let mut parse_formula = Vec::new();
-            for formula in shared_formulas {
+            let mut formula_index = HashMap::new();
+            for (index, formula) in shared_formulas.iter().enumerate() {
                 let t = self.parser.parse(formula, &cell_reference);
                 let static_result = run_static_analysis_on_node(&t);
                 parse_formula.push((t, static_result));
+                // The first of two equal texts keeps the index, as a linear search gives.
+                formula_index.entry(formula.clone()).or_insert(index as i32);
             }
             self.parsed_formulas.push(parse_formula);
+            self.shared_formula_indexes.push(formula_index);
         }
         self.parser.set_lexer_mode(LexerMode::A1);
         self.parser.set_locale(locale);
@@ -191,6 +195,7 @@ impl<'a> Model<'a> {
         self.parser
             .set_worksheets_and_names(self.workbook.get_worksheet_names(), defined_names);
         self.parsed_formulas = vec![];
+        self.shared_formula_indexes = vec![];
         self.parse_formulas();
         self.parsed_defined_names = HashMap::new();
         self.parse_defined_names();
@@ -682,6 +687,7 @@ impl<'a> Model<'a> {
             workbook,
             shared_strings: HashMap::new(),
             parsed_formulas,
+            shared_formula_indexes: Vec::new(),
             parsed_defined_names: HashMap::new(),
             parser,
             cells,
