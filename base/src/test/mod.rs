@@ -7,6 +7,7 @@ mod test_cell;
 mod test_cell_clear_contents;
 mod test_circular_references;
 mod test_column_width;
+mod test_countifs_whole_sheet_and_sheets;
 mod test_criteria;
 mod test_criteria_not_equal_text;
 mod test_criteria_white_space;
