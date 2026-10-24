@@ -103,18 +103,24 @@ impl<'a> Model<'a> {
         let right_row = first_range.right.row;
         let right_column = first_range.right.column;
 
-        let dimension = match self.workbook.worksheet(first_range.left.sheet) {
-            Ok(s) => s.dimension(),
-            Err(_) => {
-                return CalcResult::new_error(
-                    Error::ERROR,
-                    cell,
-                    format!("Invalid worksheet index: '{}'", first_range.left.sheet),
-                )
-            }
-        };
-        let max_row = dimension.max_row;
-        let max_column = dimension.max_column;
+        // IronXL: each criteria range reads the used range of its own sheet. A row or column past
+        // the used range of every sheet is empty in each range.
+        let mut max_row = 1;
+        let mut max_column = 1;
+        for range in ranges.iter() {
+            let dimension = match self.workbook.worksheet(range.left.sheet) {
+                Ok(s) => s.dimension(),
+                Err(_) => {
+                    return CalcResult::new_error(
+                        Error::ERROR,
+                        cell,
+                        format!("Invalid worksheet index: '{}'", range.left.sheet),
+                    )
+                }
+            };
+            max_row = max_row.max(dimension.max_row);
+            max_column = max_column.max(dimension.max_column);
+        }
 
         let open_row = left_row == 1 && right_row == LAST_ROW;
         let open_column = left_column == 1 && right_column == LAST_COLUMN;
@@ -131,7 +137,9 @@ impl<'a> Model<'a> {
                     }
                 }
                 if is_true {
-                    total += ((LAST_ROW - max_row) * (right_column - left_column + 1)) as f64;
+                    // IronXL: a whole sheet holds 17,179,869,184 cells; an i32 product wraps.
+                    total +=
+                        f64::from(LAST_ROW - max_row) * f64::from(right_column - left_column + 1);
                 }
                 break;
             }
@@ -147,7 +155,7 @@ impl<'a> Model<'a> {
                         }
                     }
                     if is_true {
-                        total += (LAST_COLUMN - max_column) as f64;
+                        total += f64::from(LAST_COLUMN - max_column);
                     }
                     break;
                 }
