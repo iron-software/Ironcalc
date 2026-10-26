@@ -135,38 +135,36 @@ pub(crate) fn compare_values(left: &CalcResult, right: &CalcResult) -> i32 {
     }
 }
 
-/// We convert an Excel wildcard into a Rust (Perl family) regex
+/// We convert an Excel wildcard into a Rust (Perl family) regex.
+/// IronXL: one scan reads each character one time. `~` makes the next character literal, `*` matches any text,
+/// `?` matches one character, and each other character is literal. A `~` at the end matches nothing.
+/// No placeholder text is used, so an escaped `?` before `~~` keeps its meaning.
 pub(crate) fn from_wildcard_to_regex(
     wildcard: &str,
     exact: bool,
 ) -> Result<regex::Regex, regex::Error> {
-    // 1. Escape all
-    let reg = &regex::escape(wildcard);
-
-    // 2. We convert the escaped '?' into '.' (matches a single character)
-    let reg = &reg.replace("\\?", ".");
-    // 3. We convert the escaped '*' into '.*' (matches anything)
-    let reg = &reg.replace("\\*", ".*");
-
-    // 4. We send '\\~\\~' to '??' that is an unescaped regular expression, therefore cannot be in reg
-    let reg = &reg.replace("\\~\\~", "??");
-
-    // 5. If the escaped and converted '*' is preceded by '~' then it's a raw '*'
-    let reg = &reg.replace("\\~.*", "\\*");
-    // 6. If the escaped and converted '.' is preceded by '~' then it's a raw '?'
-    let reg = &reg.replace("\\~.", "\\?");
-    // '~' is used in Excel to escape any other character.
-    //    So ~x goes to x (whatever x is)
-    // 7. Remove all the others '\\~d' --> 'd'
-    let reg = &reg.replace("\\~", "");
-    // 8. Put back the '\\~\\~'  as '\\~'
-    let reg = &reg.replace("??", "\\~");
-
-    // And we have a valid Perl regex! (As Kim Kardashian said before me: "I know, right?")
+    let mut reg = String::with_capacity(wildcard.len() + 2);
     if exact {
-        return regex::Regex::new(&format!("^{reg}$"));
+        reg.push('^');
     }
-    regex::Regex::new(reg)
+    let mut buffer = [0; 4];
+    let mut characters = wildcard.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            '~' => {
+                if let Some(escaped) = characters.next() {
+                    reg.push_str(&regex::escape(escaped.encode_utf8(&mut buffer)));
+                }
+            }
+            '*' => reg.push_str(".*"),
+            '?' => reg.push('.'),
+            _ => reg.push_str(&regex::escape(character.encode_utf8(&mut buffer))),
+        }
+    }
+    if exact {
+        reg.push('$');
+    }
+    regex::Regex::new(&reg)
 }
 
 // NUMBERS ///
