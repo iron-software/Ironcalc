@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     constants::{LAST_COLUMN, LAST_ROW},
-    expressions::token::OpUnary,
+    expressions::{token::OpUnary, utils::quote_name},
     language::Language,
     locale::Locale,
 };
@@ -475,6 +475,9 @@ fn to_string_moved(
             format!("{{{matrix_string}}}")
         }
         DefinedNameKind((name, ..)) => name.to_string(),
+        SheetDefinedNameKind {
+            sheet_name, name, ..
+        } => format!("{}!{name}", quote_name(sheet_name)),
         TableNameKind(name) => name.to_string(),
         NamedVariableKind { name, id: _ } => name.to_string(),
         CompareKind { kind, left, right } => format!(

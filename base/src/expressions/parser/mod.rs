@@ -226,6 +226,15 @@ pub enum Node {
     },
     ArrayKind(Vec<Vec<ArrayNode>>),
     DefinedNameKind(DefinedNameS),
+    // A defined name of a sheet: Sheet1!Rate | 'My Sheet'!Rate
+    // `sheet_index` is None when no sheet has the name `sheet_name`.
+    // `formula` is None when that sheet has no defined name `name`.
+    SheetDefinedNameKind {
+        sheet_name: String,
+        sheet_index: Option<u32>,
+        name: String,
+        formula: Option<String>,
+    },
     TableNameKind(String),
     NamedVariableKind {
         name: String,
@@ -430,6 +439,18 @@ impl<'a> Parser<'a> {
             }
         }
         None
+    }
+
+    // Returns the formula of the defined name `name` local to the sheet `sheet`, if any.
+    // A sheet-qualified name like Sheet1!Rate never uses a global defined name.
+    fn get_sheet_defined_name(&self, name: &str, sheet: u32) -> Option<String> {
+        let name = name.to_lowercase();
+        self.defined_names
+            .iter()
+            .find(|(df_name, df_scope, _)| {
+                df_name.to_lowercase() == name && df_scope == &Some(sheet)
+            })
+            .map(|(_, _, df_formula)| df_formula.to_owned())
     }
 
     // Returns:
@@ -1025,6 +1046,23 @@ impl<'a> Parser<'a> {
                 // xlpm: Excel Lambda Parameter
                 let name = name.trim_start_matches("_xlpm.").to_string();
                 Node::NamedVariableKind { name, id: None }
+            }
+            TokenType::SheetDefinedName { sheet, name } => {
+                // Sheet names compare without case, as in Excel
+                let sheet_lower = sheet.to_lowercase();
+                let sheet_index = self
+                    .worksheets
+                    .iter()
+                    .position(|worksheet| worksheet.to_lowercase() == sheet_lower)
+                    .map(|index| index as u32);
+                let formula =
+                    sheet_index.and_then(|index| self.get_sheet_defined_name(&name, index));
+                Node::SheetDefinedNameKind {
+                    sheet_name: sheet,
+                    sheet_index,
+                    name,
+                    formula,
+                }
             }
             TokenType::Error(kind) => Node::ErrorKind(kind),
             TokenType::Illegal(error) => Node::ParseErrorKind {

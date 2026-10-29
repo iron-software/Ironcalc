@@ -193,6 +193,7 @@ fn prefix_bound_variables(node: &mut Node, bound: &mut Vec<String>) {
         | Node::WrongRangeKind { .. }
         | Node::ArrayKind(_)
         | Node::DefinedNameKind(_)
+        | Node::SheetDefinedNameKind { .. }
         | Node::TableNameKind(_)
         | Node::ErrorKind(_)
         | Node::ParseErrorKind { .. }
@@ -815,6 +816,7 @@ fn stringify(
                 | RangeKind { .. }
                 | WrongReferenceKind { .. }
                 | DefinedNameKind(_)
+                | SheetDefinedNameKind { .. }
                 | TableNameKind(_)
                 | NamedVariableKind { .. }
                 | WrongRangeKind { .. } => stringify(
@@ -860,6 +862,7 @@ fn stringify(
                 | RangeKind { .. }
                 | WrongReferenceKind { .. }
                 | DefinedNameKind(_)
+                | SheetDefinedNameKind { .. }
                 | TableNameKind(_)
                 | NamedVariableKind { .. }
                 | WrongRangeKind { .. } => stringify(
@@ -957,6 +960,9 @@ fn stringify(
         }
         TableNameKind(value) => value.to_string(),
         DefinedNameKind((name, ..)) => name.to_string(),
+        SheetDefinedNameKind {
+            sheet_name, name, ..
+        } => format!("{}!{name}", quote_name(sheet_name)),
         NamedVariableKind { name, id: _ } => name.to_string(),
         UnaryKind { kind, right } => match kind {
             OpUnary::Minus => {
@@ -977,6 +983,7 @@ fn stringify(
                     | LambdaCallKind { .. }
                     | ArrayKind(_)
                     | DefinedNameKind(_)
+                    | SheetDefinedNameKind { .. }
                     | TableNameKind(_)
                     | NamedVariableKind { .. }
                     | ImplicitIntersection { .. }
@@ -1261,6 +1268,16 @@ pub(crate) fn rename_sheet_in_node(node: &mut Node, sheet_index: u32, new_name: 
         Node::ParseErrorKind { .. } => {}
         Node::ArrayKind(_) => {}
         Node::DefinedNameKind(_) => {}
+        Node::SheetDefinedNameKind {
+            sheet_name,
+            sheet_index: Some(index),
+            ..
+        } => {
+            if *index == sheet_index {
+                *sheet_name = new_name.to_owned();
+            }
+        }
+        Node::SheetDefinedNameKind { .. } => {}
         Node::TableNameKind(_) => {}
         Node::NamedVariableKind { .. } => {}
         Node::EmptyArgKind => {}
@@ -1289,6 +1306,15 @@ pub(crate) fn rename_defined_name_in_node(
         // Rename
         Node::DefinedNameKind((n, s, _)) => {
             if name.to_lowercase() == n.to_lowercase() && *s == scope {
+                *n = new_name.to_string();
+            }
+        }
+        Node::SheetDefinedNameKind {
+            sheet_index,
+            name: n,
+            ..
+        } => {
+            if name.to_lowercase() == n.to_lowercase() && scope.is_some() && *sheet_index == scope {
                 *n = new_name.to_string();
             }
         }

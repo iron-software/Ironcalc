@@ -401,6 +401,16 @@ impl Model<'_> {
                 )) => out.dynamic = true,
                 _ => {}
             },
+            SheetDefinedNameKind {
+                sheet_index: Some(index),
+                name,
+                formula: Some(formula),
+                ..
+            } => self.collect_precedents(
+                &DefinedNameKind((name.to_owned(), Some(*index), formula.to_owned())),
+                out,
+            ),
+            SheetDefinedNameKind { .. } => {}
             FunctionKind { kind, args } => {
                 if kind.returns_reference() {
                     out.dynamic = true;
