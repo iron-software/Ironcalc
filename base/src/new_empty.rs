@@ -1,6 +1,6 @@
 use chrono::DateTime;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::formatter::dates::DateSystem;
 use crate::{
@@ -132,43 +132,6 @@ impl<'a> Model<'a> {
         let mut parsed_defined_names = HashMap::new();
 
         for (name, formula, sheet_id) in entries {
-            let parsed_defined_name_formula = if let Ok(reference) =
-                ParsedReference::parse_reference_formula(None, &formula, self.locale, |n| {
-                    self.get_sheet_index_by_name(n)
-                }) {
-                match reference {
-                    ParsedReference::CellReference(cell_reference) => {
-                        ParsedDefinedName::CellReference(cell_reference)
-                    }
-                    ParsedReference::Range(left, right) => {
-                        ParsedDefinedName::RangeReference(Range { left, right })
-                    }
-                }
-            } else {
-                // Try the full parser — the formula might be a LAMBDA definition.
-                // Defined-name formulas may carry a leading '='; strip it before parsing.
-                let formula_body = formula.strip_prefix('=').unwrap_or(&formula);
-                let dummy_ref = CellReferenceRC {
-                    sheet: self
-                        .workbook
-                        .worksheets
-                        .first()
-                        .map(|ws| ws.get_name())
-                        .unwrap_or_else(|| "Sheet1".to_string()),
-                    row: 1,
-                    column: 1,
-                };
-                // Defined-name formulas are stored internally in English, so
-                // they must be parsed with the English parser regardless of the
-                // user's active language.
-                match self.parse_internal_formula(formula_body, &dummy_ref) {
-                    Node::LambdaDefKind { parameters, body } => {
-                        ParsedDefinedName::LambdaDefinition(parameters, *body)
-                    }
-                    _ => ParsedDefinedName::InvalidDefinedNameFormula,
-                }
-            };
-
             let local_sheet_index = if let Some(sid) = sheet_id {
                 if let Some(idx) = self.get_sheet_index_by_sheet_id(sid) {
                     Some(idx)
@@ -180,6 +143,8 @@ impl<'a> Model<'a> {
                 None
             };
 
+            let parsed_defined_name_formula =
+                self.parse_defined_name_formula(&formula, local_sheet_index);
             parsed_defined_names.insert(
                 (local_sheet_index, name.to_lowercase()),
                 parsed_defined_name_formula,
@@ -187,6 +152,59 @@ impl<'a> Model<'a> {
         }
 
         self.parsed_defined_names = parsed_defined_names;
+    }
+
+    /// Parses the formula of a defined name with the scope `scope`.
+    ///
+    /// A reference gives a cell or a range reference, and a `LAMBDA` gives a lambda definition.
+    /// Any other formula that parses, such as a constant or `OFFSET(...)`, gives a formula that
+    /// the engine evaluates in the context of the calling cell. The parser reads the formula at
+    /// `A1` of the scope sheet, so a name in it resolves on that sheet first, then in the workbook.
+    /// The formula of a workbook-scoped name is read at `A1` of the first sheet and resolves
+    /// workbook-scoped names only.
+    pub(crate) fn parse_defined_name_formula(
+        &mut self,
+        formula: &str,
+        scope: Option<u32>,
+    ) -> ParsedDefinedName {
+        if let Ok(reference) =
+            ParsedReference::parse_reference_formula(None, formula, self.locale, |n| {
+                self.get_sheet_index_by_name(n)
+            })
+        {
+            return match reference {
+                ParsedReference::CellReference(cell_reference) => {
+                    ParsedDefinedName::CellReference(cell_reference)
+                }
+                ParsedReference::Range(left, right) => {
+                    ParsedDefinedName::RangeReference(Range { left, right })
+                }
+            };
+        }
+        // Defined-name formulas may carry a leading '='; strip it before parsing.
+        let formula_body = formula.strip_prefix('=').unwrap_or(formula);
+        let context = CellReferenceRC {
+            sheet: scope
+                .and_then(|index| self.workbook.worksheets.get(index as usize))
+                .or_else(|| self.workbook.worksheets.first())
+                .map(|ws| ws.get_name())
+                .unwrap_or_else(|| "Sheet1".to_string()),
+            row: 1,
+            column: 1,
+        };
+        // Defined-name formulas are stored internally in English, so
+        // they must be parsed with the English parser regardless of the
+        // user's active language.
+        self.parser.set_workbook_names_only(scope.is_none());
+        let node = self.parse_internal_formula(formula_body, &context);
+        self.parser.set_workbook_names_only(false);
+        match node {
+            Node::LambdaDefKind { parameters, body } => {
+                ParsedDefinedName::LambdaDefinition(parameters, *body)
+            }
+            Node::ParseErrorKind { .. } => ParsedDefinedName::InvalidDefinedNameFormula,
+            node => ParsedDefinedName::Formula(node),
+        }
     }
 
     /// Reparses all formulas and defined names
@@ -689,6 +707,7 @@ impl<'a> Model<'a> {
             parsed_formulas,
             shared_formula_indexes: Vec::new(),
             parsed_defined_names: HashMap::new(),
+            evaluating_defined_names: HashSet::new(),
             parser,
             cells,
             locale,

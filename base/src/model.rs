@@ -1,6 +1,6 @@
 #![deny(missing_docs)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::vec::Vec;
 
 use crate::expressions::parser::static_analysis::run_static_analysis_on_node;
@@ -113,6 +113,9 @@ pub(crate) enum ParsedDefinedName {
     RangeReference(Range),
     /// `=LAMBDA(params..., body)`
     LambdaDefinition(Vec<NamedVariable>, Node),
+    /// Any other formula that parses, such as a constant (`=0.2`) or `=OFFSET(...)`.
+    /// The engine evaluates it in the context of the calling cell.
+    Formula(Node),
     /// `=SomethingElse`
     InvalidDefinedNameFormula,
 }
@@ -200,6 +203,9 @@ pub struct Model<'a> {
     pub(crate) shared_formula_indexes: Vec<HashMap<String, i32>>,
     /// A list of parsed defined names
     pub(crate) parsed_defined_names: HashMap<(Option<u32>, String), ParsedDefinedName>,
+    /// The formula names that are being evaluated, with the calling cell.
+    /// A name that a name evaluates again at the same cell is a circular reference.
+    pub(crate) evaluating_defined_names: HashSet<(Option<u32>, String, u32, i32, i32)>,
     /// An optimization to lookup strings faster
     pub(crate) shared_strings: HashMap<String, usize>,
     /// An instance of the parser
@@ -728,6 +734,9 @@ impl<'a> Model<'a> {
                             let lambda_id = self.get_next_lambda_id();
                             self.lambdas.insert(lambda_id, (param_names, body));
                             CalcResult::Lambda(lambda_id)
+                        }
+                        ParsedDefinedName::Formula(node) => {
+                            self.evaluate_defined_name_formula(name, *scope, &node, cell)
                         }
                         ParsedDefinedName::InvalidDefinedNameFormula => CalcResult::new_error(
                             Error::NAME,
@@ -1715,6 +1724,7 @@ impl<'a> Model<'a> {
             shared_formula_indexes: Vec::new(),
             shared_strings,
             parsed_defined_names: HashMap::new(),
+            evaluating_defined_names: HashSet::new(),
             parser,
             cells,
             language,
@@ -2732,6 +2742,35 @@ impl<'a> Model<'a> {
         Ok(None)
     }
 
+    /// Evaluates the formula of a defined name in the context of the calling cell, so that a
+    /// relative reference and a function such as `OFFSET` follow the cell. A range result stays
+    /// a range. A name that its own formula reaches again at the same cell gives `#CIRC!`.
+    fn evaluate_defined_name_formula(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        node: &Node,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        let key = (
+            scope,
+            name.to_lowercase(),
+            cell.sheet,
+            cell.row,
+            cell.column,
+        );
+        if !self.evaluating_defined_names.insert(key.clone()) {
+            return CalcResult::new_error(
+                Error::CIRC,
+                cell,
+                format!("Defined name \"{name}\" refers to itself."),
+            );
+        }
+        let result = self.evaluate_node_in_context(node, cell);
+        self.evaluating_defined_names.remove(&key);
+        result
+    }
+
     // Returns the formula for a defined name
     pub(crate) fn get_defined_name_formula(
         &self,
@@ -3600,6 +3639,86 @@ impl<'a> Model<'a> {
         self.reset_parsed_structures();
 
         Ok(())
+    }
+
+    /// Adds a defined name with any formula that parses, such as a reference, a constant
+    /// (`0.2`), or a formula (`OFFSET(Sheet1!$A$1,0,0,Sheet1!$B$1)`).
+    ///
+    /// See [`Model::add_defined_names`].
+    pub fn add_defined_name(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        formula: &str,
+    ) -> Result<(), String> {
+        self.add_defined_names(&[(name, scope, formula)]).remove(0)
+    }
+
+    /// Adds defined names with any formula that parses, then parses the workbook again once.
+    ///
+    /// Each entry is `(name, scope, formula)`. The scope is `None` for a workbook-scoped name,
+    /// else the index of its sheet. The formula is in the internal English form, with or
+    /// without a leading `=`. The engine evaluates a formula that is not a reference or a
+    /// `LAMBDA` in the context of the calling cell.
+    ///
+    /// The result has one entry for each name. A name is refused, and not added, when its
+    /// scope is not a sheet, a name of the scope has the same name in any case, or its formula
+    /// does not parse. The caller checks the characters of the name: this function accepts
+    /// names that `is_valid_identifier` refuses.
+    pub fn add_defined_names(
+        &mut self,
+        names: &[(&str, Option<u32>, &str)],
+    ) -> Vec<Result<(), String>> {
+        let mut results = Vec::with_capacity(names.len());
+        let mut added = false;
+        for &(name, scope, formula) in names {
+            let result = self.check_defined_name(name, scope, formula);
+            if let Ok(sheet_id) = result {
+                self.workbook.defined_names.push(DefinedName {
+                    name: name.to_string(),
+                    formula: formula.to_string(),
+                    sheet_id,
+                });
+                added = true;
+            }
+            results.push(result.map(|_| ()));
+        }
+        if added {
+            self.reset_parsed_structures();
+        }
+        results
+    }
+
+    /// Checks the scope, the uniqueness, and the formula of a name for `add_defined_names`, and
+    /// returns the sheet id of the scope.
+    fn check_defined_name(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        formula: &str,
+    ) -> Result<Option<u32>, String> {
+        let sheet_id = match scope {
+            Some(index) => match self.workbook.worksheet(index) {
+                Ok(ws) => Some(ws.sheet_id),
+                Err(_) => return Err("Scope: Invalid sheet index".to_string()),
+            },
+            None => None,
+        };
+        let name_upper = name.to_uppercase();
+        if self
+            .workbook
+            .defined_names
+            .iter()
+            .any(|df| df.name.to_uppercase() == name_upper && df.sheet_id == sheet_id)
+        {
+            return Err("Name: Defined name already exists".to_string());
+        }
+        let formula_body = formula.strip_prefix('=').unwrap_or(formula);
+        let context = self.defined_name_context();
+        if let Node::ParseErrorKind { .. } = self.parse_internal_formula(formula_body, &context) {
+            return Err("Formula: Invalid defined name formula".to_string());
+        }
+        Ok(sheet_id)
     }
 
     /// The context used to parse/stringify defined-name formulas. Defined names
