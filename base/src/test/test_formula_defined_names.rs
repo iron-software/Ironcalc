@@ -126,6 +126,37 @@ fn an_offset_name_is_evaluated_at_the_calling_cell() {
 }
 
 #[test]
+fn a_relative_reference_name_counts_from_the_calling_cell() {
+    // As in Excel, a relative reference in the text of a name counts from A1, and the engine
+    // evaluates it at the calling cell. An absolute reference stays where it is.
+    let model = model_with(
+        1,
+        &[
+            ("Next", None, "Sheet1!B2"),
+            ("Column", None, "Sheet1!B:B"),
+            ("Fixed", None, "Sheet1!$B$2"),
+            ("Fixed_column", None, "Sheet1!$A:$A"),
+        ],
+        &[
+            ("B2", "5"),
+            ("D4", "7"),
+            ("H1", "1"),
+            ("H2", "2"),
+            ("A1", "10"),
+            ("C3", "=Next"),
+            ("G10", "=SUM(Column)"),
+            ("E1", "=Fixed"),
+            ("E2", "=SUM(Fixed_column)"),
+        ],
+    );
+    assert_eq!(number(&model, "Sheet1!C3"), 7.0);
+    // `B:B` at G10 is the column to the right of the calling cell.
+    assert_eq!(number(&model, "Sheet1!G10"), 3.0);
+    assert_eq!(number(&model, "Sheet1!E1"), 5.0);
+    assert_eq!(number(&model, "Sheet1!E2"), 10.0);
+}
+
+#[test]
 fn a_sheet_name_shadows_the_workbook_name_on_its_sheet() {
     let model = model_with(
         3,

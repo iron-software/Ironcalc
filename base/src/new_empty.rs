@@ -156,31 +156,18 @@ impl<'a> Model<'a> {
 
     /// Parses the formula of a defined name with the scope `scope`.
     ///
-    /// A reference gives a cell or a range reference, and a `LAMBDA` gives a lambda definition.
-    /// Any other formula that parses, such as a constant or `OFFSET(...)`, gives a formula that
-    /// the engine evaluates in the context of the calling cell. The parser reads the formula at
-    /// `A1` of the scope sheet, so a name in it resolves on that sheet first, then in the workbook.
-    /// The formula of a workbook-scoped name is read at `A1` of the first sheet and resolves
-    /// workbook-scoped names only.
+    /// An absolute reference gives a cell or a range reference, and a `LAMBDA` gives a lambda
+    /// definition. Any other formula that parses, such as a constant, `OFFSET(...)`, or a
+    /// reference with a relative part, gives a formula that the engine evaluates in the context
+    /// of the calling cell. The parser reads the formula at `A1` of the scope sheet, so a relative
+    /// reference counts from the calling cell, and a name in it resolves on that sheet first,
+    /// then in the workbook. The formula of a workbook-scoped name is read at `A1` of the first
+    /// sheet and resolves workbook-scoped names only.
     pub(crate) fn parse_defined_name_formula(
         &mut self,
         formula: &str,
         scope: Option<u32>,
     ) -> ParsedDefinedName {
-        if let Ok(reference) =
-            ParsedReference::parse_reference_formula(None, formula, self.locale, |n| {
-                self.get_sheet_index_by_name(n)
-            })
-        {
-            return match reference {
-                ParsedReference::CellReference(cell_reference) => {
-                    ParsedDefinedName::CellReference(cell_reference)
-                }
-                ParsedReference::Range(left, right) => {
-                    ParsedDefinedName::RangeReference(Range { left, right })
-                }
-            };
-        }
         // Defined-name formulas may carry a leading '='; strip it before parsing.
         let formula_body = formula.strip_prefix('=').unwrap_or(formula);
         let context = CellReferenceRC {
@@ -198,6 +185,41 @@ impl<'a> Model<'a> {
         self.parser.set_workbook_names_only(scope.is_none());
         let node = self.parse_internal_formula(formula_body, &context);
         self.parser.set_workbook_names_only(false);
+        let relative = matches!(
+            node,
+            Node::ReferenceKind {
+                absolute_row: false,
+                ..
+            } | Node::ReferenceKind {
+                absolute_column: false,
+                ..
+            }
+        ) || matches!(
+            node,
+            Node::RangeKind {
+                absolute_row1,
+                absolute_column1,
+                absolute_row2,
+                absolute_column2,
+                ..
+            } if !(absolute_row1 && absolute_column1 && absolute_row2 && absolute_column2)
+        );
+        if !relative {
+            if let Ok(reference) =
+                ParsedReference::parse_reference_formula(None, formula, self.locale, |n| {
+                    self.get_sheet_index_by_name(n)
+                })
+            {
+                return match reference {
+                    ParsedReference::CellReference(cell_reference) => {
+                        ParsedDefinedName::CellReference(cell_reference)
+                    }
+                    ParsedReference::Range(left, right) => {
+                        ParsedDefinedName::RangeReference(Range { left, right })
+                    }
+                };
+            }
+        }
         match node {
             Node::LambdaDefKind { parameters, body } => {
                 ParsedDefinedName::LambdaDefinition(parameters, *body)
