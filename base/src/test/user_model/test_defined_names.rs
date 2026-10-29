@@ -103,9 +103,10 @@ fn delete_sheet() {
 
     model.delete_sheet(0).unwrap();
 
+    // IronXL: the name now refers to `#REF!$A$1`, so a formula that uses it gives `#REF!`, as in Excel.
     assert_eq!(
         model.get_formatted_cell_value(0, 2, 1),
-        Ok("#NAME?".to_string())
+        Ok("#REF!".to_string())
     );
 
     assert_eq!(

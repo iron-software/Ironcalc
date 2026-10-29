@@ -395,7 +395,10 @@ impl Model<'_> {
                         absolute_column2: true,
                     })
                 }
-                Ok(Some(ParsedDefinedName::LambdaDefinition(..))) => out.dynamic = true,
+                // The formula of a name, such as `OFFSET(...)`, is evaluated at the calling cell.
+                Ok(Some(
+                    ParsedDefinedName::LambdaDefinition(..) | ParsedDefinedName::Formula(..),
+                )) => out.dynamic = true,
                 _ => {}
             },
             FunctionKind { kind, args } => {

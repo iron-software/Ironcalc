@@ -31,6 +31,7 @@ mod test_fn_count;
 mod test_fn_depreciation;
 mod test_fn_financial_simple;
 mod test_forecast;
+mod test_formula_defined_names;
 mod test_long_chains;
 mod test_statistical_functions;
 // FIXME: These tests are failing

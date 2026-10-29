@@ -283,6 +283,19 @@ impl<'a> Model<'a> {
                         ParsedDefinedName::RangeReference(range) => {
                             return CalcResult::Number(range.left.sheet as f64 + 1.0)
                         }
+                        ParsedDefinedName::Formula(node) => {
+                            let node = node.clone();
+                            return match self.evaluate_node_in_context(&node, cell) {
+                                CalcResult::Range { left, .. } => {
+                                    CalcResult::Number(left.sheet as f64 + 1.0)
+                                }
+                                _ => CalcResult::Error {
+                                    error: Error::ERROR,
+                                    origin: cell,
+                                    message: "Invalid name".to_string(),
+                                },
+                            };
+                        }
                         ParsedDefinedName::InvalidDefinedNameFormula
                         | ParsedDefinedName::LambdaDefinition(..) => {
                             return CalcResult::Error {

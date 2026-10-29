@@ -276,6 +276,9 @@ pub struct Parser<'a> {
     /// function/name completion even when the surrounding parse succeeds (`SU`,
     /// `A1+F`) or fails for an unrelated reason (`IF(VLOOK`). See that method.
     trailing_name: Option<(String, usize)>,
+    /// When true, a name resolves to a workbook-scoped defined name only, as in the formula of a
+    /// workbook-scoped defined name.
+    workbook_names_only: bool,
 }
 
 pub fn new_parser_english<'a>(
@@ -312,6 +315,7 @@ impl<'a> Parser<'a> {
             language,
             expecting_here: vec![ExpectedTokens::Other],
             trailing_name: None,
+            workbook_names_only: false,
         }
     }
     pub fn set_lexer_mode(&mut self, mode: lexer::LexerMode) {
@@ -335,6 +339,12 @@ impl<'a> Parser<'a> {
     ) {
         self.worksheets = worksheets;
         self.defined_names = defined_names;
+    }
+
+    /// When `value` is true, a name resolves to a workbook-scoped defined name only, and not to a
+    /// defined name of the context sheet.
+    pub fn set_workbook_names_only(&mut self, value: bool) {
+        self.workbook_names_only = value;
     }
 
     pub fn parse(&mut self, formula: &str, context: &CellReferenceRC) -> Node {
@@ -428,7 +438,10 @@ impl<'a> Parser<'a> {
     //  * Some(None): If there is a global defined name
     fn get_defined_name(&self, name: &str, sheet: u32) -> Option<(Option<u32>, String)> {
         for (df_name, df_scope, df_formula) in &self.defined_names {
-            if name.to_lowercase() == df_name.to_lowercase() && df_scope == &Some(sheet) {
+            if !self.workbook_names_only
+                && name.to_lowercase() == df_name.to_lowercase()
+                && df_scope == &Some(sheet)
+            {
                 return Some((*df_scope, df_formula.to_owned()));
             }
         }
