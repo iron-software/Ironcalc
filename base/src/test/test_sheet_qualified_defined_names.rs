@@ -87,6 +87,24 @@ fn a_sheet_qualified_name_resolves_from_another_sheet() {
 }
 
 #[test]
+fn a_long_sheet_qualified_name_is_not_a_column() {
+    // A name of many letters overflowed the column number of the lexer.
+    let model = model_with(
+        &[("InterestRateOfTheYear", Some(0), "5")],
+        &[
+            ("Two!A1", "=One!InterestRateOfTheYear*2"),
+            ("Two!A2", "=One!ABCDEFGHIJKLMNOP"),
+        ],
+    );
+    assert_eq!(number(&model, "Two!A1"), 10.0);
+    assert_eq!(model._get_text("Two!A2"), "#NAME?");
+    assert_eq!(
+        tokens("Sheet1!ABCDEFGHIJKLMNOP1", &LexerMode::A1),
+        [sheet_name("Sheet1", "ABCDEFGHIJKLMNOP1"), TokenType::EOF]
+    );
+}
+
+#[test]
 fn a_missing_name_or_a_missing_sheet_gives_name_error() {
     let model = model_with(
         &[("Local", Some(0), "5")],

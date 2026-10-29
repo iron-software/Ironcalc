@@ -20,6 +20,10 @@ pub fn column_to_number(column: &str) -> Result<i32, String> {
             return Err("Column identifier can use only A-Z characters".to_string());
         }
         column_number = column_number * 26 + ((character as i32) - 64);
+        // Stop before the number overflows: a long name such as Sheet1!LongerName is not a column
+        if column_number > LAST_COLUMN {
+            return Err("Column is not valid.".to_string());
+        }
     }
 
     match is_valid_column_number(column_number) {
