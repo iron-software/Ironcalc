@@ -260,4 +260,9 @@ pub enum TokenType {
         specifier: Option<TableSpecifier>,
         table_reference: Option<TableReference>,
     },
+    // A defined name of a sheet: Sheet1!Rate | 'My Sheet'!Rate
+    SheetDefinedName {
+        sheet: String,
+        name: String,
+    },
 }

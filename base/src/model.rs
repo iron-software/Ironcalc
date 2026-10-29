@@ -720,6 +720,22 @@ impl<'a> Model<'a> {
                 self.call_lambda(lambda_result, args, cell)
             }
             ArrayKind(s) => CalcResult::Array(s.to_owned()),
+            SheetDefinedNameKind {
+                sheet_index: Some(index),
+                name,
+                formula: Some(formula),
+                ..
+            } => self.evaluate_node_in_context(
+                &DefinedNameKind((name.to_owned(), Some(*index), formula.to_owned())),
+                cell,
+            ),
+            SheetDefinedNameKind {
+                sheet_name, name, ..
+            } => CalcResult::new_error(
+                Error::NAME,
+                cell,
+                format!("Defined name \"{sheet_name}!{name}\" not found."),
+            ),
             DefinedNameKind((name, scope, _)) => {
                 if let Ok(Some(parsed_defined_name)) = self.get_parsed_defined_name(name, *scope) {
                     match parsed_defined_name {

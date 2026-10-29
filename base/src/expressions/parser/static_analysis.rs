@@ -153,6 +153,14 @@ pub fn add_implicit_intersection(node: &mut Node, add: bool) {
                 }
             }
         }
+        Node::SheetDefinedNameKind { formula, .. } => {
+            if add && formula.as_deref().is_some_and(is_range_reference) {
+                *node = Node::ImplicitIntersection {
+                    automatic: true,
+                    child: Box::new(node.clone()),
+                }
+            }
+        }
         Node::NamedVariableKind { name, id } => {
             if add {
                 *node = Node::ImplicitIntersection {
@@ -235,6 +243,7 @@ pub fn remove_redundant_implicit_intersection(node: &mut Node, add: bool) {
         | Node::RangeKind { .. }
         | Node::OpRangeKind { .. }
         | Node::DefinedNameKind(_)
+        | Node::SheetDefinedNameKind { .. }
         | Node::NamedVariableKind { .. }
         | Node::TableNameKind(_)
         | Node::LambdaDefKind { .. }
@@ -376,7 +385,7 @@ pub(crate) fn run_static_analysis_on_node(node: &Node) -> StaticResult {
         | Node::CompareKind { left, right, .. } => static_analysis_op_nodes(left, right),
 
         // defined names
-        Node::DefinedNameKind(_) => {
+        Node::DefinedNameKind(_) | Node::SheetDefinedNameKind { .. } => {
             // TODO: We could do better if we tracked the defined names
             StaticResult::Unknown
         }

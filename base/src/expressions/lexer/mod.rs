@@ -791,11 +791,25 @@ impl<'a> Lexer<'a> {
     }
 
     fn consume_range(&mut self, sheet: Option<String>) -> TokenType {
+        let start = self.position;
         let m = if self.mode == LexerMode::A1 {
             self.consume_range_a1()
         } else {
             self.consume_range_r1c1()
         };
+        if let Some(sheet) = &sheet {
+            // A defined name of the sheet: Sheet1!Rate
+            // In R1C1 mode a name like Rate starts with the row reference R, so the longer text wins.
+            if let Some((name, end)) = self.peek_sheet_defined_name(start) {
+                if m.is_err() || end > self.position {
+                    self.position = end;
+                    return TokenType::SheetDefinedName {
+                        sheet: sheet.to_owned(),
+                        name,
+                    };
+                }
+            }
+        }
         match m {
             Ok(ParsedRange { left, right }) => {
                 if let Some(right) = right {
@@ -812,5 +826,22 @@ impl<'a> Lexer<'a> {
             }
             Err(error) => TokenType::Illegal(error),
         }
+    }
+
+    // Returns the defined name of a sheet that starts at `start`, after its '!', and the position after the name.
+    // The name is an identifier that is not a reference, and no '(', '[' or '!' follows it.
+    // Example: Rate in Sheet1!Rate
+    fn peek_sheet_defined_name(&self, start: usize) -> Option<(String, usize)> {
+        let length = self.chars[start..]
+            .iter()
+            .take_while(|c| c.is_alphanumeric() || **c == '_' || **c == '.')
+            .count();
+        let end = start + length;
+        let name: String = self.chars[start..end].iter().collect();
+        let next_char = self.chars.get(end);
+        if utils::is_valid_identifier(&name) && !matches!(next_char, Some('(' | '[' | '!')) {
+            return Some((name, end));
+        }
+        None
     }
 }

@@ -13,6 +13,11 @@ fn test_column_to_number() {
         column_to_number("XFE"),
         Err("Column is not valid.".to_string())
     );
+    // Many letters do not overflow the column number.
+    assert_eq!(
+        column_to_number("ABCDEFGHIJKLMNOP"),
+        Err("Column is not valid.".to_string())
+    );
     assert_eq!(
         column_to_number(""),
         Err("Column identifier cannot be empty.".to_string())
