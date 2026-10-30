@@ -288,6 +288,7 @@ impl<'a> Model<'a> {
             Node::WrongReferenceKind { .. } => None,
             Node::WrongRangeKind { .. } => None,
             Node::OpRangeKind { .. } => None,
+            Node::Reference3DKind { .. } => None,
             Node::OpConcatenateKind { .. } => None,
             Node::ErrorKind(_) => None,
             Node::ParseErrorKind { .. } => None,

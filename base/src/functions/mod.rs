@@ -2302,6 +2302,17 @@ impl<'a> Model<'a> {
         args: &[Node],
         cell: CellReferenceIndex,
     ) -> CalcResult {
+        // IronXL: a function that takes a 3-D reference reads one reference for each sheet of its span.
+        if crate::three_d::takes_three_d(kind)
+            && args
+                .iter()
+                .any(|arg| matches!(arg, Node::Reference3DKind { .. }))
+        {
+            return match self.three_d_arguments(args) {
+                Some(expanded) => self.evaluate_function(kind, &expanded, cell),
+                None => CalcResult::new_error(Error::REF, cell, "Sheet not found".to_string()),
+            };
+        }
         match kind {
             Function::And => self.fn_and(args, cell),
             Function::False => self.fn_false(args, cell),

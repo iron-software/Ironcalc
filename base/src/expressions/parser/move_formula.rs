@@ -1,5 +1,5 @@
 use super::{
-    stringify::{stringify_reference, DisplaceData},
+    stringify::{stringify_reference, to_localized_string, DisplaceData},
     ArrayNode, Node, Reference,
 };
 use crate::{
@@ -479,6 +479,15 @@ fn to_string_moved(
             sheet_name, name, ..
         } => format!("{}!{name}", quote_name(sheet_name)),
         TableNameKind(name) => name.to_string(),
+        // IronXL: a cut and paste keeps a 3-D reference as written, as Excel does.
+        Reference3DKind { .. } => {
+            let context = CellReferenceRC {
+                sheet: move_context.source_sheet_name.to_string(),
+                column: move_context.column,
+                row: move_context.row,
+            };
+            to_localized_string(node, &context, locale, language)
+        }
         NamedVariableKind { name, id: _ } => name.to_string(),
         CompareKind { kind, left, right } => format!(
             "{}{}{}",

@@ -35,6 +35,7 @@ mod test_formula_defined_names;
 mod test_long_chains;
 mod test_sheet_qualified_defined_names;
 mod test_statistical_functions;
+mod test_three_d_references;
 // FIXME: These tests are failing
 // mod test_fn_datevalue_datedif;
 mod test_fn_day;

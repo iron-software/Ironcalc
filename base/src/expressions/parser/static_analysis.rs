@@ -75,6 +75,7 @@ pub fn add_implicit_intersection(node: &mut Node, add: bool) {
         | Node::NamedFunctionKind { .. }
         | Node::ArrayKind(_)
         | Node::ReferenceKind { .. }
+        | Node::Reference3DKind { .. }
         | Node::LambdaDefKind { .. }
         | Node::LambdaCallKind { .. } => {}
         Node::ImplicitIntersection { child, .. } => {
@@ -241,6 +242,7 @@ pub fn remove_redundant_implicit_intersection(node: &mut Node, add: bool) {
         | Node::ArrayKind(_)
         | Node::ReferenceKind { .. }
         | Node::RangeKind { .. }
+        | Node::Reference3DKind { .. }
         | Node::OpRangeKind { .. }
         | Node::DefinedNameKind(_)
         | Node::SheetDefinedNameKind { .. }
@@ -376,6 +378,8 @@ pub(crate) fn run_static_analysis_on_node(node: &Node) -> StaticResult {
             StaticResult::Unknown
         }
         Node::ReferenceKind { .. } => StaticResult::Scalar,
+        // IronXL: a 3-D reference gets no implicit intersection. Outside the functions that take it, it gives #VALUE!.
+        Node::Reference3DKind { .. } => StaticResult::Scalar,
 
         // binary operations
         Node::OpConcatenateKind { left, right }

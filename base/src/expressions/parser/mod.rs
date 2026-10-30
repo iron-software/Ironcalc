@@ -235,6 +235,17 @@ pub enum Node {
         name: String,
         formula: Option<String>,
     },
+    // IronXL: a 3-D reference: Data1:Data3!A1 | 'My Jan:Mar'!A1:B2
+    // `reference` is a `ReferenceKind` or a `RangeKind` without a sheet name. Its address applies to each sheet from
+    // the first end to the last end in the order of the sheets.
+    // `first_index` or `last_index` is None when no sheet has the name of that end.
+    Reference3DKind {
+        first_sheet: String,
+        first_index: Option<u32>,
+        last_sheet: String,
+        last_index: Option<u32>,
+        reference: Box<Node>,
+    },
     TableNameKind(String),
     NamedVariableKind {
         name: String,
@@ -439,6 +450,134 @@ impl<'a> Parser<'a> {
             }
         }
         None
+    }
+
+    // A reference node from the parts of a reference token. `sheet` is None for a reference without a sheet.
+    fn reference_node(
+        &self,
+        sheet: Option<String>,
+        row: i32,
+        column: i32,
+        absolute_row: bool,
+        absolute_column: bool,
+    ) -> Node {
+        let context = &self.context;
+        let sheet_index = match &sheet {
+            Some(name) => self.get_sheet_index_by_name(name),
+            None => self.get_sheet_index_by_name(&context.sheet),
+        };
+        let a1_mode = self.lexer.is_a1_mode();
+        let row = if absolute_row || !a1_mode {
+            row
+        } else {
+            row - context.row
+        };
+        let column = if absolute_column || !a1_mode {
+            column
+        } else {
+            column - context.column
+        };
+        match sheet_index {
+            Some(index) => Node::ReferenceKind {
+                sheet_name: sheet,
+                sheet_index: index,
+                row,
+                column,
+                absolute_row,
+                absolute_column,
+            },
+            None => Node::WrongReferenceKind {
+                sheet_name: sheet,
+                row,
+                column,
+                absolute_row,
+                absolute_column,
+            },
+        }
+    }
+
+    // A range node from the parts of a range token. `sheet` is None for a range without a sheet.
+    fn range_node(
+        &self,
+        sheet: Option<String>,
+        left: ParsedReference,
+        right: ParsedReference,
+    ) -> Node {
+        let context = &self.context;
+        let sheet_index = match &sheet {
+            Some(name) => self.get_sheet_index_by_name(name),
+            None => self.get_sheet_index_by_name(&context.sheet),
+        };
+        let mut row1 = left.row;
+        let mut column1 = left.column;
+        let mut row2 = right.row;
+        let mut column2 = right.column;
+
+        let mut absolute_column1 = left.absolute_column;
+        let mut absolute_column2 = right.absolute_column;
+        let mut absolute_row1 = left.absolute_row;
+        let mut absolute_row2 = right.absolute_row;
+
+        if self.lexer.is_a1_mode() {
+            if row1 > row2 {
+                (row2, row1) = (row1, row2);
+                (absolute_row2, absolute_row1) = (absolute_row1, absolute_row2);
+            }
+            if column1 > column2 {
+                (column2, column1) = (column1, column2);
+                (absolute_column2, absolute_column1) = (absolute_column1, absolute_column2);
+            }
+        }
+
+        if self.lexer.is_a1_mode() {
+            if !absolute_row1 {
+                row1 -= context.row
+            };
+            if !absolute_column1 {
+                column1 -= context.column
+            };
+            if !absolute_row2 {
+                row2 -= context.row
+            };
+            if !absolute_column2 {
+                column2 -= context.column
+            };
+        }
+
+        match sheet_index {
+            Some(index) => Node::RangeKind {
+                sheet_name: sheet,
+                sheet_index: index,
+                row1,
+                column1,
+                row2,
+                column2,
+                absolute_column1,
+                absolute_column2,
+                absolute_row1,
+                absolute_row2,
+            },
+            None => Node::WrongRangeKind {
+                sheet_name: sheet,
+                row1,
+                column1,
+                row2,
+                column2,
+                absolute_column1,
+                absolute_column2,
+                absolute_row1,
+                absolute_row2,
+            },
+        }
+    }
+
+    // IronXL: the index of the sheet `name`, compared without case, as Excel compares sheet names.
+    fn get_sheet_index_by_name_without_case(&self, name: &str) -> Option<u32> {
+        let name = name.to_lowercase();
+        self.worksheets
+            .iter()
+            .position(|sheet| sheet.to_lowercase() == name)
+            .map(|index| index as u32)
     }
 
     // Returns the formula of the defined name `name` local to the sheet `sheet`, if any.
@@ -739,6 +878,26 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_primary(&mut self) -> Node {
+        if let Some((first_sheet, last_sheet, left, right)) = self.lexer.consume_three_d_reference()
+        {
+            let reference = match right {
+                Some(right) => self.range_node(None, left, right),
+                None => self.reference_node(
+                    None,
+                    left.row,
+                    left.column,
+                    left.absolute_row,
+                    left.absolute_column,
+                ),
+            };
+            return Node::Reference3DKind {
+                first_index: self.get_sheet_index_by_name_without_case(&first_sheet),
+                last_index: self.get_sheet_index_by_name_without_case(&last_sheet),
+                first_sheet,
+                last_sheet,
+                reference: Box::new(reference),
+            };
+        }
         let next_token = self.lexer.next_token();
         match next_token {
             TokenType::LeftParenthesis => {
@@ -806,109 +965,8 @@ impl<'a> Parser<'a> {
                 column,
                 absolute_column,
                 absolute_row,
-            } => {
-                let context = &self.context;
-                let sheet_index = match &sheet {
-                    Some(name) => self.get_sheet_index_by_name(name),
-                    None => self.get_sheet_index_by_name(&context.sheet),
-                };
-                let a1_mode = self.lexer.is_a1_mode();
-                let row = if absolute_row || !a1_mode {
-                    row
-                } else {
-                    row - context.row
-                };
-                let column = if absolute_column || !a1_mode {
-                    column
-                } else {
-                    column - context.column
-                };
-                match sheet_index {
-                    Some(index) => Node::ReferenceKind {
-                        sheet_name: sheet,
-                        sheet_index: index,
-                        row,
-                        column,
-                        absolute_row,
-                        absolute_column,
-                    },
-                    None => Node::WrongReferenceKind {
-                        sheet_name: sheet,
-                        row,
-                        column,
-                        absolute_row,
-                        absolute_column,
-                    },
-                }
-            }
-            TokenType::Range { sheet, left, right } => {
-                let context = &self.context;
-                let sheet_index = match &sheet {
-                    Some(name) => self.get_sheet_index_by_name(name),
-                    None => self.get_sheet_index_by_name(&context.sheet),
-                };
-                let mut row1 = left.row;
-                let mut column1 = left.column;
-                let mut row2 = right.row;
-                let mut column2 = right.column;
-
-                let mut absolute_column1 = left.absolute_column;
-                let mut absolute_column2 = right.absolute_column;
-                let mut absolute_row1 = left.absolute_row;
-                let mut absolute_row2 = right.absolute_row;
-
-                if self.lexer.is_a1_mode() {
-                    if row1 > row2 {
-                        (row2, row1) = (row1, row2);
-                        (absolute_row2, absolute_row1) = (absolute_row1, absolute_row2);
-                    }
-                    if column1 > column2 {
-                        (column2, column1) = (column1, column2);
-                        (absolute_column2, absolute_column1) = (absolute_column1, absolute_column2);
-                    }
-                }
-
-                if self.lexer.is_a1_mode() {
-                    if !absolute_row1 {
-                        row1 -= context.row
-                    };
-                    if !absolute_column1 {
-                        column1 -= context.column
-                    };
-                    if !absolute_row2 {
-                        row2 -= context.row
-                    };
-                    if !absolute_column2 {
-                        column2 -= context.column
-                    };
-                }
-
-                match sheet_index {
-                    Some(index) => Node::RangeKind {
-                        sheet_name: sheet,
-                        sheet_index: index,
-                        row1,
-                        column1,
-                        row2,
-                        column2,
-                        absolute_column1,
-                        absolute_column2,
-                        absolute_row1,
-                        absolute_row2,
-                    },
-                    None => Node::WrongRangeKind {
-                        sheet_name: sheet,
-                        row1,
-                        column1,
-                        row2,
-                        column2,
-                        absolute_column1,
-                        absolute_column2,
-                        absolute_row1,
-                        absolute_row2,
-                    },
-                }
-            }
+            } => self.reference_node(sheet, row, column, absolute_row, absolute_column),
+            TokenType::Range { sheet, left, right } => self.range_node(sheet, left, right),
             TokenType::Ident(name) => {
                 let next_token = self.lexer.peek_token();
                 // If this identifier is the last token before the cursor (its
