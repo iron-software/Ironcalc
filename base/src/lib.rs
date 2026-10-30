@@ -62,6 +62,7 @@ mod implicit_intersection;
 mod model;
 mod precedents;
 mod styles;
+mod three_d;
 mod tz;
 mod units;
 mod user_model;

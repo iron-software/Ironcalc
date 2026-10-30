@@ -828,6 +828,61 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// IronXL: reads a 3-D reference, such as `Data1:Data3!A1`, `Jan:Mar!A1:B2`, or `'My Jan:Mar'!A1`, when it starts at
+    /// the position of the next token. Returns the first end, the last end, and the reference or range
+    /// after the `!`: its first cell, and its last cell for a range. Returns None and moves nothing for every other
+    /// text.
+    ///
+    /// `next_token` never calls this function, so the token stream of a formula does not change. Each end is a name
+    /// that needs no quotes, or both ends are in one quoted prefix that holds a `:`. A prefix after `]`, such as
+    /// `[1]Data1:Data3!A1`, and a quoted prefix with `[` or `]` are in another workbook.
+    pub fn consume_three_d_reference(
+        &mut self,
+    ) -> Option<(String, String, ParsedReference, Option<ParsedReference>)> {
+        let position = self.position;
+        self.next_token_position = None;
+        self.consume_whitespace();
+        let start = self.position;
+        let ends = if start > 0 && self.chars[start - 1] == ']' {
+            None
+        } else if self.chars.get(start) == Some(&'\'') {
+            self.position += 1;
+            self.consume_single_quote_string()
+                .ok()
+                .filter(|span| !span.contains(['[', ']']))
+                .and_then(|span| {
+                    let (first, last) = span.split_once(':')?;
+                    Some((first.to_string(), last.to_string()))
+                })
+                .filter(|(first, last)| !first.is_empty() && !last.is_empty())
+        } else {
+            let first = self.consume_identifier();
+            let last = if self.chars.get(self.position) == Some(&':') {
+                self.position += 1;
+                self.consume_identifier()
+            } else {
+                String::new()
+            };
+            let plain = |end: &str| !end.is_empty() && utils::quote_name(end) == end;
+            (plain(&first) && plain(&last)).then_some((first, last))
+        };
+        if let Some((first, last)) = ends {
+            if self.chars.get(self.position) == Some(&'!') {
+                self.position += 1;
+                let range = if self.mode == LexerMode::A1 {
+                    self.consume_range_a1()
+                } else {
+                    self.consume_range_r1c1()
+                };
+                if let Ok(ParsedRange { left, right }) = range {
+                    return Some((first, last, left, right));
+                }
+            }
+        }
+        self.position = position;
+        None
+    }
+
     // Returns the defined name of a sheet that starts at `start`, after its '!', and the position after the name.
     // The name is an identifier that is not a reference, and no '(', '[' or '!' follows it.
     // Example: Rate in Sheet1!Rate

@@ -189,6 +189,7 @@ fn prefix_bound_variables(node: &mut Node, bound: &mut Vec<String>) {
         | Node::StringKind(_)
         | Node::ReferenceKind { .. }
         | Node::RangeKind { .. }
+        | Node::Reference3DKind { .. }
         | Node::WrongReferenceKind { .. }
         | Node::WrongRangeKind { .. }
         | Node::ArrayKind(_)
@@ -651,6 +652,23 @@ fn stringify(
             );
             format!("{s1}:{s2}")
         }
+        Reference3DKind {
+            first_sheet,
+            last_sheet,
+            reference,
+            ..
+        } => format!(
+            "{}{}",
+            three_d_prefix(first_sheet, last_sheet),
+            stringify(
+                reference,
+                context,
+                &DisplaceData::None,
+                export_to_excel,
+                locale,
+                language
+            )
+        ),
         OpRangeKind { left, right } => format!(
             "{}:{}",
             stringify(
@@ -814,6 +832,7 @@ fn stringify(
                 | StringKind(_)
                 | ReferenceKind { .. }
                 | RangeKind { .. }
+                | Reference3DKind { .. }
                 | WrongReferenceKind { .. }
                 | DefinedNameKind(_)
                 | SheetDefinedNameKind { .. }
@@ -860,6 +879,7 @@ fn stringify(
                 | StringKind(_)
                 | ReferenceKind { .. }
                 | RangeKind { .. }
+                | Reference3DKind { .. }
                 | WrongReferenceKind { .. }
                 | DefinedNameKind(_)
                 | SheetDefinedNameKind { .. }
@@ -972,6 +992,7 @@ fn stringify(
                     | StringKind(_)
                     | ReferenceKind { .. }
                     | RangeKind { .. }
+                    | Reference3DKind { .. }
                     | WrongReferenceKind { .. }
                     | WrongRangeKind { .. }
                     | OpRangeKind { .. }
@@ -1162,6 +1183,20 @@ fn stringify(
     }
 }
 
+// IronXL: the sheet prefix of a 3-D reference, with its `!`: `Data1:Data3!`, or both ends in one quoted prefix when an
+// end needs quotes, such as `'My Jan:Mar'!`.
+fn three_d_prefix(first: &str, last: &str) -> String {
+    if quote_name(first) == first && quote_name(last) == last {
+        format!("{first}:{last}!")
+    } else {
+        format!(
+            "'{}:{}'!",
+            first.replace('\'', "''"),
+            last.replace('\'', "''")
+        )
+    }
+}
+
 pub(crate) fn rename_sheet_in_node(node: &mut Node, sheet_index: u32, new_name: &str) {
     match node {
         // Rename
@@ -1193,6 +1228,20 @@ pub(crate) fn rename_sheet_in_node(node: &mut Node, sheet_index: u32, new_name: 
         Node::WrongRangeKind { sheet_name, .. } => {
             if sheet_name.is_some() {
                 *sheet_name = Some(new_name.to_owned());
+            }
+        }
+        Node::Reference3DKind {
+            first_sheet,
+            first_index,
+            last_sheet,
+            last_index,
+            ..
+        } => {
+            if *first_index == Some(sheet_index) {
+                *first_sheet = new_name.to_owned();
+            }
+            if *last_index == Some(sheet_index) {
+                *last_sheet = new_name.to_owned();
             }
         }
 
@@ -1391,6 +1440,7 @@ pub(crate) fn rename_defined_name_in_node(
         Node::EmptyArgKind => {}
         Node::ReferenceKind { .. } => {}
         Node::RangeKind { .. } => {}
+        Node::Reference3DKind { .. } => {}
         Node::WrongReferenceKind { .. } => {}
         Node::WrongRangeKind { .. } => {}
         Node::TableNameKind(_) => {}

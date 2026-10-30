@@ -604,6 +604,11 @@ impl<'a> Model<'a> {
                 CalcResult::new_error(Error::REF, cell, "Wrong reference".to_string())
             }
             OpRangeKind { left, right } => self.get_range(left, right, cell),
+            Reference3DKind {
+                first_index,
+                last_index,
+                ..
+            } => self.evaluate_three_d(*first_index, *last_index, cell),
             WrongRangeKind { .. } => {
                 CalcResult::new_error(Error::REF, cell, "Wrong range".to_string())
             }

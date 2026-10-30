@@ -411,6 +411,17 @@ impl Model<'_> {
                 out,
             ),
             SheetDefinedNameKind { .. } => {}
+            // IronXL: the reference on each sheet of the span. An end that is not a sheet reads no cell.
+            Reference3DKind {
+                first_index,
+                last_index,
+                reference,
+                ..
+            } => {
+                for sheet in crate::three_d::span(*first_index, *last_index).unwrap_or_default() {
+                    self.collect_precedents(&crate::three_d::on_sheet(reference, sheet, ""), out);
+                }
+            }
             FunctionKind { kind, args } => {
                 if kind.returns_reference() {
                     out.dynamic = true;
