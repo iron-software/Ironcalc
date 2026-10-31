@@ -123,6 +123,8 @@ fn m_is_a_minute_after_an_hour_and_before_a_second_in_both_cases() {
         ("MM:SS", "05:04"),
         ("mm ss", "05 04"),
         ("MMSS", "0504"),
+        ("m \"m\" ss", "5 m 04"),
+        ("M \"M\" SS", "5 M 04"),
         // otherwise a month
         ("mm", "03"),
         ("MM", "03"),
@@ -131,12 +133,18 @@ fn m_is_a_minute_after_an_hour_and_before_a_second_in_both_cases() {
         ("dd mm", "15 03"),
         ("DD MM", "15 03"),
         ("mm \"ss\"", "03 ss"),
+        ("mm dd ss", "03 15 04"),
+        ("MM DD SS", "03 15 04"),
+        ("mm;ss", "03"),
         ("yyyy-mm-dd hh:mm:ss", "2023-03-15 13:05:04"),
         ("YYYY-MM-DD HH:MM:SS", "2023-03-15 13:05:04"),
     ];
     for (code, expected) in cases {
         assert_eq!(text(AFTERNOON, code), expected, "{code}");
     }
+    // before an elapsed second (00:05:04)
+    assert_eq!(text(304.0 / 86400.0, "m [ss]"), "5 304");
+    assert_eq!(text(304.0 / 86400.0, "M [SS]"), "5 304");
 }
 
 #[test]

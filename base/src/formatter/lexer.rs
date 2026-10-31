@@ -81,6 +81,26 @@ impl Token {
             || self == &Token::YearShort
             || self == &Token::Year
     }
+
+    // IronXL: a date token, or a time token such as an hour, a second, or AM/PM.
+    pub fn is_date_or_time(&self) -> bool {
+        self.is_date()
+            || matches!(
+                self,
+                Token::Hour
+                    | Token::HourPadded
+                    | Token::Second
+                    | Token::SecondPadded
+                    | Token::ElapsedHour
+                    | Token::ElapsedHourPadded
+                    | Token::ElapsedMinute
+                    | Token::ElapsedMinutePadded
+                    | Token::ElapsedSecond
+                    | Token::ElapsedSecondPadded
+                    | Token::AMPM
+                    | Token::AP(_)
+            )
+    }
 }
 
 impl Lexer {
@@ -130,13 +150,19 @@ impl Lexer {
         count
     }
 
-    // IronXL: the next token that is not a literal, without a change of the position.
-    pub fn peek_token_after_literals(&mut self) -> Token {
+    // IronXL: the next date or time token of the section, without a change of the position. EOF at
+    // the end of the section or at a token that is not valid.
+    pub fn peek_date_or_time_token(&mut self) -> Token {
         let position = self.position;
-        let mut token = self.next_token();
-        while let Token::Literal(_) = token {
-            token = self.next_token();
-        }
+        let token = loop {
+            let token = self.next_token();
+            if token.is_date_or_time() {
+                break token;
+            }
+            if matches!(token, Token::EOF | Token::Separator | Token::ILLEGAL) {
+                break Token::EOF;
+            }
+        };
         self.position = position;
         token
     }
