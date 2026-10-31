@@ -40,6 +40,7 @@ pub enum TextToken {
     ElapsedSecond,
     ElapsedSecondPadded,
     AMPM,
+    AP(bool),
 }
 pub struct NumberPart {
     pub color: Option<i32>,
@@ -132,6 +133,16 @@ impl Parser {
         while self.lexer.peek_token() != Token::EOF {
             let part = self.parse_part();
             self.parts.push(part);
+        }
+    }
+
+    // IronXL: an m or mm just before s or ss (literals between) is a minute, as Excel reads it.
+    // `next_token` is the token after the m; the lexer stands after it.
+    fn is_before_second(&mut self, next_token: &Token) -> bool {
+        let is_second = |token: &Token| matches!(token, Token::Second | Token::SecondPadded);
+        match next_token {
+            Token::Literal(_) => is_second(&self.lexer.peek_token_after_literals()),
+            _ => is_second(next_token),
         }
     }
 
@@ -280,7 +291,7 @@ impl Parser {
                     tokens.push(TextToken::MonthName);
                 }
                 Token::Month => {
-                    if is_time {
+                    if is_time || self.is_before_second(&next_token) {
                         // minute
                         tokens.push(TextToken::Minute);
                     } else {
@@ -289,7 +300,7 @@ impl Parser {
                     }
                 }
                 Token::MonthPadded => {
-                    if is_time {
+                    if is_time || self.is_before_second(&next_token) {
                         // minute padded
                         tokens.push(TextToken::MinutePadded);
                     } else {
@@ -333,6 +344,11 @@ impl Parser {
                     is_date = true;
                     use_ampm = true;
                     tokens.push(TextToken::AMPM);
+                }
+                Token::AP(lower) => {
+                    is_date = true;
+                    use_ampm = true;
+                    tokens.push(TextToken::AP(lower));
                 }
                 Token::Scientific => {
                     if !is_scientific {
