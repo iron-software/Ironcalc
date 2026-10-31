@@ -398,6 +398,15 @@ pub fn format_number_with_date_system(
                         let ampm = if hours < 12.0 { "AM" } else { "PM" };
                         text = format!("{text}{ampm}");
                     }
+                    TextToken::AP(lower) => {
+                        let ap = match (hours < 12.0, lower) {
+                            (true, false) => "A",
+                            (false, false) => "P",
+                            (true, true) => "a",
+                            (false, true) => "p",
+                        };
+                        text = format!("{text}{ap}");
+                    }
                     TextToken::Minute => {
                         let minute = minutes as i32;
                         text = format!("{text}{minute}");
@@ -649,6 +658,7 @@ pub fn format_number_with_date_system(
                     TextToken::Second => {}
                     TextToken::SecondPadded => {}
                     TextToken::AMPM => {}
+                    TextToken::AP(_) => {}
                     TextToken::ElapsedHour => {}
                     TextToken::ElapsedHourPadded => {}
                     TextToken::ElapsedMinute => {}

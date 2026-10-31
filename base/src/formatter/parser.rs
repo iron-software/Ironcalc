@@ -40,6 +40,7 @@ pub enum TextToken {
     ElapsedSecond,
     ElapsedSecondPadded,
     AMPM,
+    AP(bool),
 }
 pub struct NumberPart {
     pub color: Option<i32>,
@@ -118,6 +119,13 @@ impl ParsePart {
     }
 }
 
+fn is_second(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Second | Token::SecondPadded | Token::ElapsedSecond | Token::ElapsedSecondPadded
+    )
+}
+
 // Numbers:
 // [integer section][decimal point][fractional section][optional exponent]
 // So #,##0.00 is valid but 0.00#,## is not.
@@ -133,6 +141,18 @@ impl Parser {
             let part = self.parse_part();
             self.parts.push(part);
         }
+    }
+
+    // IronXL: an m or mm is a minute when the next date or time token is a second, as Excel reads it.
+    // `next_token` is the token after the m; the lexer stands after it.
+    fn is_before_second(&mut self, next_token: &Token) -> bool {
+        if next_token.is_date_or_time() {
+            return is_second(next_token);
+        }
+        if matches!(next_token, Token::EOF | Token::Separator | Token::ILLEGAL) {
+            return false;
+        }
+        is_second(&self.lexer.peek_date_or_time_token())
     }
 
     fn parse_part(&mut self) -> ParsePart {
@@ -280,7 +300,7 @@ impl Parser {
                     tokens.push(TextToken::MonthName);
                 }
                 Token::Month => {
-                    if is_time {
+                    if is_time || self.is_before_second(&next_token) {
                         // minute
                         tokens.push(TextToken::Minute);
                     } else {
@@ -289,7 +309,7 @@ impl Parser {
                     }
                 }
                 Token::MonthPadded => {
-                    if is_time {
+                    if is_time || self.is_before_second(&next_token) {
                         // minute padded
                         tokens.push(TextToken::MinutePadded);
                     } else {
@@ -333,6 +353,11 @@ impl Parser {
                     is_date = true;
                     use_ampm = true;
                     tokens.push(TextToken::AMPM);
+                }
+                Token::AP(lower) => {
+                    is_date = true;
+                    use_ampm = true;
+                    tokens.push(TextToken::AP(lower));
                 }
                 Token::Scientific => {
                     if !is_scientific {

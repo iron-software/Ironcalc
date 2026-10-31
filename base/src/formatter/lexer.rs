@@ -48,7 +48,8 @@ pub enum Token {
     ElapsedHourPadded,   // [hh]
     ElapsedMinutePadded, // [mm]
     ElapsedSecondPadded, // [ss]
-    AMPM,                // AM/PM (or A/P)
+    AMPM,                // AM/PM
+    AP(bool),            // A/P (true for a/p, in lowercase)
     ILLEGAL,
     EOF,
 }
@@ -79,6 +80,26 @@ impl Token {
             || self == &Token::MonthLetter
             || self == &Token::YearShort
             || self == &Token::Year
+    }
+
+    // IronXL: a date token, or a time token such as an hour, a second, or AM/PM.
+    pub fn is_date_or_time(&self) -> bool {
+        self.is_date()
+            || matches!(
+                self,
+                Token::Hour
+                    | Token::HourPadded
+                    | Token::Second
+                    | Token::SecondPadded
+                    | Token::ElapsedHour
+                    | Token::ElapsedHourPadded
+                    | Token::ElapsedMinute
+                    | Token::ElapsedMinutePadded
+                    | Token::ElapsedSecond
+                    | Token::ElapsedSecondPadded
+                    | Token::AMPM
+                    | Token::AP(_)
+            )
     }
 }
 
@@ -112,6 +133,38 @@ impl Lexer {
         } else {
             None
         }
+    }
+
+    // IronXL: counts the letter that was just read and each repeat of it that follows, in any
+    // letter case, as Excel does (YYYY = yyyy, Mm = mm).
+    fn consume_repeats(&mut self, letter: char) -> usize {
+        let mut count = 1;
+        while let Some(c) = self.peek_char() {
+            if c.eq_ignore_ascii_case(&letter) {
+                count += 1;
+                self.read_next_char();
+            } else {
+                break;
+            }
+        }
+        count
+    }
+
+    // IronXL: the next date or time token of the section, without a change of the position. EOF at
+    // the end of the section or at a token that is not valid.
+    pub fn peek_date_or_time_token(&mut self) -> Token {
+        let position = self.position;
+        let token = loop {
+            let token = self.next_token();
+            if token.is_date_or_time() {
+                break token;
+            }
+            if matches!(token, Token::EOF | Token::Separator | Token::ILLEGAL) {
+                break Token::EOF;
+            }
+        };
+        self.position = position;
+        token
     }
 
     fn set_error(&mut self, error: &str) {
@@ -419,7 +472,7 @@ impl Lexer {
                         Token::ILLEGAL
                     }
                 }
-                'E' => {
+                'E' | 'e' => {
                     if let Some(s) = self.read_next_char() {
                         if s == '+' {
                             Token::Scientific
@@ -434,40 +487,22 @@ impl Lexer {
                         Token::ILLEGAL
                     }
                 }
-                'd' => {
-                    let mut d = 1;
-                    while let Some('d') = self.peek_char() {
-                        d += 1;
-                        self.read_next_char();
-                    }
-                    match d {
-                        1 => Token::Day,
-                        2 => Token::DayPadded,
-                        3 => Token::DayNameShort,
-                        _ => Token::DayName,
-                    }
-                }
-                'm' => {
-                    let mut m = 1;
-                    while let Some('m') = self.peek_char() {
-                        m += 1;
-                        self.read_next_char();
-                    }
-                    match m {
-                        1 => Token::Month,       // (or minute)
-                        2 => Token::MonthPadded, // (or minute padded)
-                        3 => Token::MonthNameShort,
-                        4 => Token::MonthName,
-                        5 => Token::MonthLetter,
-                        _ => Token::MonthName,
-                    }
-                }
-                'y' => {
-                    let mut y = 1;
-                    while let Some('y') = self.peek_char() {
-                        y += 1;
-                        self.read_next_char();
-                    }
+                'd' | 'D' => match self.consume_repeats('d') {
+                    1 => Token::Day,
+                    2 => Token::DayPadded,
+                    3 => Token::DayNameShort,
+                    _ => Token::DayName,
+                },
+                'm' | 'M' => match self.consume_repeats('m') {
+                    1 => Token::Month,       // (or minute)
+                    2 => Token::MonthPadded, // (or minute padded)
+                    3 => Token::MonthNameShort,
+                    4 => Token::MonthName,
+                    5 => Token::MonthLetter,
+                    _ => Token::MonthName,
+                },
+                'y' | 'Y' => {
+                    let y = self.consume_repeats('y');
                     if y == 1 || y == 2 {
                         Token::YearShort
                     } else {
@@ -475,15 +510,7 @@ impl Lexer {
                     }
                 }
                 'h' | 'H' => {
-                    let mut h = 1;
-                    while let Some(c) = self.peek_char() {
-                        if c.eq_ignore_ascii_case(&'h') {
-                            h += 1;
-                            self.read_next_char();
-                        } else {
-                            break;
-                        }
-                    }
+                    let h = self.consume_repeats('h');
                     if h == 1 {
                         Token::Hour
                     } else if h == 2 {
@@ -493,12 +520,8 @@ impl Lexer {
                         Token::ILLEGAL
                     }
                 }
-                's' => {
-                    let mut s = 1;
-                    while let Some('s') = self.peek_char() {
-                        s += 1;
-                        self.read_next_char();
-                    }
+                's' | 'S' => {
+                    let s = self.consume_repeats('s');
                     if s == 1 {
                         Token::Second
                     } else if s == 2 {
@@ -511,6 +534,15 @@ impl Lexer {
                 'A' | 'a' => {
                     if let Some('M') | Some('m') = self.peek_char() {
                         self.read_next_char();
+                    } else if let Some('/') = self.peek_char() {
+                        // IronXL: A/P in any case
+                        self.read_next_char();
+                        if let Some('P') | Some('p') = self.peek_char() {
+                            self.read_next_char();
+                            return Token::AP(x == 'a');
+                        }
+                        self.set_error("Unexpected character after 'A/'");
+                        return Token::ILLEGAL;
                     } else {
                         self.set_error("Unexpected character after 'A'");
                         return Token::ILLEGAL;
@@ -538,7 +570,7 @@ impl Lexer {
                 'g' | 'G' => {
                     for c in "eneral".chars() {
                         let cc = self.read_next_char();
-                        if Some(c) != cc {
+                        if !cc.is_some_and(|cc| cc.eq_ignore_ascii_case(&c)) {
                             self.set_error(&format!("Unexpected character: {x}"));
                             return Token::ILLEGAL;
                         }
