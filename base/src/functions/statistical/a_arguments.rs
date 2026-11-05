@@ -99,7 +99,7 @@ impl<'a> Model<'a> {
                 }
                 _ => self.evaluate_node_in_context(arg, cell),
             },
-            _ => self.evaluate_node_in_context(arg, cell),
+            _ => self.evaluate_reference_argument(arg, cell),
         }
     }
 

@@ -416,7 +416,7 @@ impl<'a> Model<'a> {
                 Ok(Range { left, right: left })
             }
             _ => {
-                let value = self.evaluate_node_in_context(node, cell);
+                let value = self.evaluate_reference_argument(node, cell);
                 if value.is_error() {
                     return Err(value);
                 }
