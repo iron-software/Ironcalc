@@ -494,15 +494,8 @@ impl<'a> Model<'a> {
         }) {
             return e;
         }
-        if let Some(mina) = mina {
-            CalcResult::Number(mina)
-        } else {
-            CalcResult::Error {
-                error: Error::VALUE,
-                origin: cell,
-                message: "No numeric values for MINA".to_string(),
-            }
-        }
+        // As Excel and MIN, MINA gives 0 when no argument holds a value.
+        CalcResult::Number(mina.unwrap_or(0.0))
     }
 
     pub(crate) fn fn_maxa(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
@@ -519,15 +512,8 @@ impl<'a> Model<'a> {
         }) {
             return e;
         }
-        if let Some(maxa) = maxa {
-            CalcResult::Number(maxa)
-        } else {
-            CalcResult::Error {
-                error: Error::VALUE,
-                origin: cell,
-                message: "No numeric values for MAXA".to_string(),
-            }
-        }
+        // As Excel and MAX, MAXA gives 0 when no argument holds a value.
+        CalcResult::Number(maxa.unwrap_or(0.0))
     }
 
     pub(crate) fn fn_skew(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
