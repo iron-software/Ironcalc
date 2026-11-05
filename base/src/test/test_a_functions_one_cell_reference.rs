@@ -126,6 +126,46 @@ fn a_defined_name_of_one_cell_is_a_reference() {
 }
 
 #[test]
+fn a_defined_name_of_one_cell_with_a_relative_part_is_a_reference_at_the_calling_cell() {
+    let mut model = model();
+    // Read at `A1`, so in column `A` the name `rel` refers to `B1` and `next` to `B3`.
+    model.new_defined_name("rel", None, "Sheet1!B$1").unwrap();
+    model
+        .new_defined_name("next", Some(0), "Sheet1!B$3")
+        .unwrap();
+    model
+        .new_defined_name("rows", None, "Sheet1!B$1:B$2")
+        .unwrap();
+    let cases: [(&str, &[&str; 7]); 4] = [
+        ("rel,B2", &TEXT_AND_FIVE),
+        ("next,B2", &ONE_AND_FIVE),
+        ("Sheet1!next,B2", &ONE_AND_FIVE),
+        ("rows", &TEXT_AND_FIVE),
+    ];
+    let mut row = 10;
+    let mut expected = vec![];
+    for (args, results) in cases {
+        for (index, name) in A_FUNCTIONS.iter().enumerate() {
+            let formula = format!("={name}({args})");
+            model._set(&format!("A{row}"), &formula);
+            expected.push((row, formula, results[index]));
+            row += 1;
+        }
+    }
+    // In column `C`, `rel` refers to the empty cell `D1`, so `MINA` skips it.
+    model._set("C1", "=MINA(rel,9)");
+    model.evaluate();
+    for (row, formula, result) in expected {
+        assert_eq!(model._get_text(&format!("A{row}")), result, "{formula}");
+    }
+    assert_eq!(model._get_text("C1"), "9");
+    // `D1` changes, so the A function reads the new value.
+    model._set("D1", "text");
+    model.evaluate();
+    assert_eq!(model._get_text("C1"), "0");
+}
+
+#[test]
 fn a_defined_name_of_a_range_keeps_its_result() {
     assert_a_functions("rng", &TEXT_AND_FIVE);
 }

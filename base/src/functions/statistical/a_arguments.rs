@@ -67,7 +67,7 @@ impl<'a> Model<'a> {
     }
 
     /// Evaluates an argument of an A function. A one-cell reference and a defined name of one
-    /// cell give a range of one cell, so the range rule reads them.
+    /// cell, absolute or relative, give a range of one cell, so the range rule reads them.
     fn evaluate_a_argument(&mut self, arg: &Node, cell: CellReferenceIndex) -> CalcResult {
         match arg {
             Node::ReferenceKind { .. } => {
@@ -92,6 +92,11 @@ impl<'a> Model<'a> {
                     left: reference,
                     right: reference,
                 },
+                // A name with a relative part, such as `Sheet1!B$1`, is a one-cell reference at
+                // the calling cell.
+                Ok(Some(ParsedDefinedName::Formula(node @ Node::ReferenceKind { .. }))) => {
+                    self.evaluate_a_argument(&node, cell)
+                }
                 _ => self.evaluate_node_in_context(arg, cell),
             },
             _ => self.evaluate_node_in_context(arg, cell),
