@@ -85,6 +85,60 @@ fn a_one_cell_reference_to_an_empty_cell_is_skipped() {
 }
 
 #[test]
+fn mina_and_maxa_give_zero_when_no_argument_holds_a_value() {
+    // As Excel, MIN, and MAX do. B6 and B7 are empty on both sheets.
+    let formulas: Vec<String> = [
+        "=MINA(B6)",
+        "=MINA(B6:B6)",
+        "=MAXA(B6)",
+        "=MAXA(B6:B6)",
+        "=MINA(B6:B7)",
+        "=MAXA(B6:B7)",
+        "=MINA(B6,B7)",
+        "=MAXA(B6,B7)",
+        "=MINA(Sheet1:Sheet2!B6)",
+        "=MAXA(Sheet1:Sheet2!B6:B7)",
+        "=MIN(B6)",
+        "=MAX(B6:B6)",
+    ]
+    .iter()
+    .map(|formula| formula.to_string())
+    .collect();
+    assert_eq!(
+        results(&formulas),
+        ["0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0"]
+    );
+}
+
+#[test]
+fn mina_and_maxa_with_no_value_keep_the_error_and_the_direct_text_rule() {
+    let formulas: Vec<String> = [
+        "=MINA(B6,C1)",
+        "=MAXA(C1,B6)",
+        "=MINA(\"x\")",
+        "=MAXA(B6,\"x\")",
+        "=MINA(B6,B2)",
+        "=MAXA(B6,B2)",
+        "=MINA(B1,B2)",
+        "=AVERAGEA(B6)",
+        "=VARA(B6)",
+        "=VARPA(B6)",
+        "=STDEVA(B6)",
+        "=STDEVPA(B6)",
+    ]
+    .iter()
+    .map(|formula| formula.to_string())
+    .collect();
+    assert_eq!(
+        results(&formulas),
+        [
+            "#DIV/0!", "#DIV/0!", "#VALUE!", "#VALUE!", "5", "5", "0", "#DIV/0!", "#DIV/0!",
+            "#DIV/0!", "#DIV/0!", "#DIV/0!"
+        ]
+    );
+}
+
+#[test]
 fn absolute_and_other_sheet_one_cell_references_get_the_same_rule() {
     assert_a_functions("$B$1,B2", &TEXT_AND_FIVE);
     assert_a_functions("B$3,$B2", &ONE_AND_FIVE);
