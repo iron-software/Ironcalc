@@ -279,7 +279,22 @@ impl<'a> Model<'a> {
     // INDEX(range, row_num, [column_num], [area_num])
     // At the moment IronCalc does not support references with multiple areas,
     // so area_num = 1 (or missing).
+    // IronXL: a value use of INDEX reads the value of a one-cell result.
     pub(crate) fn fn_index(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        match self.index_reference(args, cell) {
+            CalcResult::Range { left, right } if left == right => self.evaluate_cell(left),
+            result => result,
+        }
+    }
+
+    /// IronXL: evaluates INDEX as a reference, as in Excel. INDEX with a reference gives a range,
+    /// also a range of one cell. INDEX with an array gives a value. A function that reads a
+    /// reference argument uses this result, so it reads `INDEX(B1:B2,1)` as it reads `B1`.
+    pub(crate) fn index_reference(
+        &mut self,
+        args: &[Node],
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
         if !(2..=4).contains(&args.len()) {
             return CalcResult::new_args_number_error(cell);
         }
@@ -362,25 +377,17 @@ impl<'a> Model<'a> {
                     let c = left.column + col_eff as i32 - 1;
                     (c, c)
                 };
-                if row_start == row_end && col_start == col_end {
-                    self.evaluate_cell(CellReferenceIndex {
+                CalcResult::Range {
+                    left: CellReferenceIndex {
                         sheet: left.sheet,
                         row: row_start,
                         column: col_start,
-                    })
-                } else {
-                    CalcResult::Range {
-                        left: CellReferenceIndex {
-                            sheet: left.sheet,
-                            row: row_start,
-                            column: col_start,
-                        },
-                        right: CellReferenceIndex {
-                            sheet: left.sheet,
-                            row: row_end,
-                            column: col_end,
-                        },
-                    }
+                    },
+                    right: CellReferenceIndex {
+                        sheet: left.sheet,
+                        row: row_end,
+                        column: col_end,
+                    },
                 }
             }
             CalcResult::Array(arr) => {
@@ -1020,8 +1027,7 @@ impl<'a> Model<'a> {
         if args.len() != 1 {
             return CalcResult::new_args_number_error(cell);
         }
-        if let CalcResult::Range { left, right } = self.evaluate_node_with_reference(&args[0], cell)
-        {
+        if let CalcResult::Range { left, right } = self.evaluate_reference_node(&args[0], cell) {
             if left.sheet != right.sheet {
                 return CalcResult::Error {
                     error: Error::ERROR,

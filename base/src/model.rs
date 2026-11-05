@@ -29,6 +29,7 @@ use crate::{
         },
         lexer::is_likely_date_number_format,
     },
+    functions::Function,
     implicit_intersection::implicit_intersection,
     language::{get_default_language, get_language, Language},
     locale::{get_default_locale, get_locale, Locale},
@@ -361,9 +362,44 @@ impl<'a> Model<'a> {
         }
     }
 
+    /// IronXL: evaluates a node that a function reads as a reference, as in Excel: the range
+    /// operator, `CELL`, `ISFORMULA`, and `FORMULATEXT`. `INDEX` with a reference gives a range,
+    /// also a range of one cell. Each other node gives the result of
+    /// `evaluate_node_with_reference`, so `@`, `#`, and `CHOOSE` keep the value of `INDEX`.
+    pub(crate) fn evaluate_reference_node(
+        &mut self,
+        node: &Node,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        match node {
+            Node::FunctionKind {
+                kind: Function::Index,
+                ..
+            } => self.evaluate_reference_argument(node, cell),
+            _ => self.evaluate_node_with_reference(node, cell),
+        }
+    }
+
+    /// IronXL: evaluates an argument that a function reads as a reference, as in Excel.
+    /// `INDEX` with a reference gives a range, also a range of one cell. Each other node gives
+    /// the result of `evaluate_node_in_context`.
+    pub(crate) fn evaluate_reference_argument(
+        &mut self,
+        node: &Node,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        match node {
+            Node::FunctionKind {
+                kind: Function::Index,
+                args,
+            } => self.index_reference(args, cell),
+            _ => self.evaluate_node_in_context(node, cell),
+        }
+    }
+
     fn get_range(&mut self, left: &Node, right: &Node, cell: CellReferenceIndex) -> CalcResult {
-        let left_result = self.evaluate_node_with_reference(left, cell);
-        let right_result = self.evaluate_node_with_reference(right, cell);
+        let left_result = self.evaluate_reference_node(left, cell);
+        let right_result = self.evaluate_reference_node(right, cell);
         match (left_result, right_result) {
             (
                 CalcResult::Range {

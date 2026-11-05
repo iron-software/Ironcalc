@@ -20,7 +20,7 @@ impl<'a> Model<'a> {
         F: FnMut(f64),
     {
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Number(value) => {
                     f(value);
                 }
@@ -154,7 +154,7 @@ impl<'a> Model<'a> {
         }
         let mut result = 0.0;
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Number(_) => {
                     result += 1.0;
                 }
@@ -200,7 +200,7 @@ impl<'a> Model<'a> {
         }
         let mut result = 0.0;
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::EmptyCell | CalcResult::EmptyArg => {}
                 CalcResult::Range { left, right } => {
                     if left.sheet != right.sheet {
@@ -249,7 +249,7 @@ impl<'a> Model<'a> {
         }
         let mut result = 0.0;
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::EmptyCell | CalcResult::EmptyArg => result += 1.0,
                 CalcResult::String(s) if s.is_empty() => result += 1.0,
                 CalcResult::Range { left, right } => {
@@ -297,7 +297,7 @@ impl<'a> Model<'a> {
         }
 
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Number(value) => {
                     accumulate(&mut values, &mut sum, &mut count, value);
                 }

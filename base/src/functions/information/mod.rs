@@ -8,6 +8,7 @@ use crate::{
         types::CellReferenceIndex,
         utils::number_to_column,
     },
+    functions::Function,
     get_all_timezones,
     model::{Model, ParsedDefinedName},
 };
@@ -124,6 +125,7 @@ impl<'a> Model<'a> {
 
     // Returns true if it is a reference or evaluates to a reference
     // But DOES NOT evaluate
+    // IronXL: INDEX is a reference when it gives a range, so it is evaluated.
     pub(crate) fn fn_isref(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() != 1 {
             return CalcResult::new_args_number_error(cell);
@@ -132,6 +134,13 @@ impl<'a> Model<'a> {
             Node::ReferenceKind { .. } | Node::RangeKind { .. } | Node::OpRangeKind { .. } => {
                 CalcResult::Boolean(true)
             }
+            Node::FunctionKind {
+                kind: Function::Index,
+                args,
+            } => CalcResult::Boolean(matches!(
+                self.index_reference(args, cell),
+                CalcResult::Range { .. }
+            )),
             Node::FunctionKind { kind, args: _ } => CalcResult::Boolean(kind.returns_reference()),
             _ => CalcResult::Boolean(false),
         }
@@ -164,8 +173,7 @@ impl<'a> Model<'a> {
         if args.len() != 1 {
             return CalcResult::new_args_number_error(cell);
         }
-        if let CalcResult::Range { left, right } = self.evaluate_node_with_reference(&args[0], cell)
-        {
+        if let CalcResult::Range { left, right } = self.evaluate_reference_node(&args[0], cell) {
             if left.sheet != right.sheet {
                 return CalcResult::Error {
                     error: Error::ERROR,
@@ -411,7 +419,7 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let reference = if arg_count == 2 {
-            match self.evaluate_node_with_reference(&args[1], cell) {
+            match self.evaluate_reference_node(&args[1], cell) {
                 CalcResult::Range { left, right: _ } => {
                     // we just take the left cell of the range
                     left

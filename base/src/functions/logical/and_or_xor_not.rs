@@ -74,7 +74,7 @@ impl<'a> Model<'a> {
 
         let mut result = None;
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Boolean(value) => result = Some(fold_fn(result, value)),
                 CalcResult::Number(value) => result = Some(fold_fn(result, value != 0.0)),
                 CalcResult::Range { left, right } => {

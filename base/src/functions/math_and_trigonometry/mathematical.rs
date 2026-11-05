@@ -13,7 +13,7 @@ impl<'a> Model<'a> {
     pub(crate) fn fn_min(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         let mut result = f64::NAN;
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Number(value) => result = value.min(result),
                 CalcResult::Range { left, right } => {
                     if left.sheet != right.sheet {
@@ -73,7 +73,7 @@ impl<'a> Model<'a> {
     pub(crate) fn fn_max(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         let mut result = f64::NAN;
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Number(value) => result = value.max(result),
                 CalcResult::Range { left, right } => {
                     if left.sheet != right.sheet {
@@ -285,7 +285,7 @@ impl<'a> Model<'a> {
                 _ => arg,
             };
 
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Range { left, right } => {
                     if left.sheet != right.sheet {
                         return CalcResult::new_error(
@@ -384,7 +384,7 @@ impl<'a> Model<'a> {
 
         let mut result = 0.0;
         for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
+            match self.evaluate_reference_argument(arg, cell) {
                 CalcResult::Number(value) => result += value * value,
                 CalcResult::Range { left, right } => {
                     if left.sheet != right.sheet {
@@ -517,7 +517,7 @@ impl<'a> Model<'a> {
                 },
                 _ => arg,
             };
-            let cell_value = self.evaluate_node_in_context(arg, cell);
+            let cell_value = self.evaluate_reference_argument(arg, cell);
 
             match cell_value {
                 CalcResult::Range { left, right } => {
