@@ -167,6 +167,17 @@ impl Lexer {
         token
     }
 
+    // IronXL: the count of `0` tokens that come next, without a change of the position.
+    pub fn peek_zero_count(&mut self) -> usize {
+        let position = self.position;
+        let mut count = 0;
+        while self.next_token() == Token::Zero {
+            count += 1;
+        }
+        self.position = position;
+        count
+    }
+
     fn set_error(&mut self, error: &str) {
         self.error_message = error.to_string();
         self.error_position = self.position;

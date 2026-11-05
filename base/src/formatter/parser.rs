@@ -39,6 +39,8 @@ pub enum TextToken {
     ElapsedMinutePadded,
     ElapsedSecond,
     ElapsedSecondPadded,
+    // IronXL: `.` and 1 to 3 `0` right after a second, as `.000` of `ss.000`: the count of digits.
+    SecondDecimals(usize),
     AMPM,
     AP(bool),
 }
@@ -119,6 +121,9 @@ impl ParsePart {
     }
 }
 
+// IronXL: the largest count of digits after the seconds that Excel reads, as `.000` of `ss.000`.
+const MAX_SECOND_DECIMALS: usize = 3;
+
 fn is_second(token: &Token) -> bool {
     matches!(
         token,
@@ -167,6 +172,7 @@ impl Parser {
         let mut comma = 0;
         let mut percent = 0;
         let mut last_token_is_digit = false;
+        let mut last_token_is_second = false;
         let mut color = None;
         let mut condition = None;
         let mut tokens = vec![];
@@ -179,8 +185,9 @@ impl Parser {
         let mut is_time = false;
 
         while token != Token::EOF && token != Token::Separator {
-            let next_token = self.lexer.next_token();
+            let mut next_token = self.lexer.next_token();
             let token_is_digit = token.is_digit();
+            let token_is_second = is_second(&token);
             is_number = is_number || token_is_digit;
             let next_token_is_digit = next_token.is_digit();
             if token_is_digit {
@@ -216,7 +223,21 @@ impl Parser {
                     percent += 1;
                 }
                 Token::Period => {
-                    if is_number && !found_decimal_dot {
+                    // IronXL: `.` and 1 to 3 `0` right after a second are the digits after the
+                    // seconds, as Excel reads them. These `0` are not digits of a number. A `0`
+                    // after them makes the date section invalid, as before.
+                    let decimals = if last_token_is_second && next_token == Token::Zero {
+                        1 + self.lexer.peek_zero_count()
+                    } else {
+                        0
+                    };
+                    if (1..=MAX_SECOND_DECIMALS).contains(&decimals) {
+                        for _ in 1..decimals {
+                            self.lexer.next_token();
+                        }
+                        tokens.push(TextToken::SecondDecimals(decimals));
+                        next_token = self.lexer.next_token();
+                    } else if is_number && !found_decimal_dot {
                         tokens.push(TextToken::Period);
                         found_decimal_dot = true;
                         if number.is_integer() {
@@ -414,6 +435,7 @@ impl Parser {
                 }
             }
             last_token_is_digit = token_is_digit;
+            last_token_is_second = token_is_second;
             token = next_token;
         }
         if is_date {

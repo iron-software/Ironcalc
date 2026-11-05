@@ -9,9 +9,10 @@ use super::{
 
 const SECONDS_PER_DAY: i64 = 86_400;
 
-/// IronXL: the serial `value` as a count of whole seconds, rounded to the nearest second.
-fn whole_seconds(value: f64) -> i64 {
-    (value * SECONDS_PER_DAY as f64).round() as i64
+/// IronXL: the serial `value` as a count of units, rounded to the nearest unit. A day has
+/// `units_per_day` units.
+fn whole_units(value: f64, units_per_day: i64) -> i64 {
+    (value * units_per_day as f64).round() as i64
 }
 
 /// IronXL: true for a token that shows a part of the time of day or an elapsed time.
@@ -206,15 +207,28 @@ pub fn format_number_with_date_system(
         ParsePart::Date(p) => {
             let tokens = &p.tokens;
             let mut text = "".to_string();
-            // IronXL: a section with a time part rounds the value to whole seconds once. Each
-            // part reads this count, so a carry goes to the minute, the hour, and the day, and
-            // `:60` does not occur. An elapsed code counts in i64, so it does not clamp.
-            let (day, elapsed_seconds) = if tokens.iter().any(is_time_token) {
-                let elapsed_seconds = whole_seconds(value);
-                (elapsed_seconds.div_euclid(SECONDS_PER_DAY), elapsed_seconds)
+            // IronXL: a section with a time part rounds the value once to the smallest unit
+            // that it shows: a second, or the digits after the seconds (the largest count).
+            // Each part reads this count, so a carry goes to the second, the minute, the hour,
+            // and the day, and `:60` does not occur. An elapsed code counts in i64, so it does
+            // not clamp.
+            let decimals = tokens
+                .iter()
+                .map(|token| match token {
+                    TextToken::SecondDecimals(count) => *count,
+                    _ => 0,
+                })
+                .max()
+                .unwrap_or(0);
+            let units_per_second = 10_i64.pow(decimals as u32);
+            let units_per_day = SECONDS_PER_DAY * units_per_second;
+            let (day, units) = if tokens.iter().any(is_time_token) {
+                let units = whole_units(value, units_per_day);
+                (units.div_euclid(units_per_day), units)
             } else {
                 (value as i64, 0)
             };
+            let elapsed_seconds = units.div_euclid(units_per_second);
             let second_of_day = elapsed_seconds.rem_euclid(SECONDS_PER_DAY);
             let hours = second_of_day / 3600;
             let minutes = second_of_day / 60 % 60;
@@ -430,6 +444,11 @@ pub fn format_number_with_date_system(
                     TextToken::SecondPadded => {
                         let second = seconds;
                         text = format!("{text}{second:02}");
+                    }
+                    TextToken::SecondDecimals(count) => {
+                        let shown = units.rem_euclid(units_per_second)
+                            / 10_i64.pow((decimals - count) as u32);
+                        text = format!("{text}.{shown:0count$}");
                     }
                     TextToken::AMPM => {
                         let ampm = if hours < 12 { "AM" } else { "PM" };
@@ -702,6 +721,7 @@ pub fn format_number_with_date_system(
                     TextToken::ElapsedMinutePadded => {}
                     TextToken::ElapsedSecond => {}
                     TextToken::ElapsedSecondPadded => {}
+                    TextToken::SecondDecimals(_) => {}
                 }
             }
             Formatted {
