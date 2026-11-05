@@ -7,6 +7,8 @@ use crate::{
     calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
 };
 
+use super::a_arguments::ArrayValues;
+
 impl<'a> Model<'a> {
     pub(crate) fn for_each_value<F>(
         &mut self,
@@ -101,106 +103,6 @@ impl<'a> Model<'a> {
         Ok(())
     }
 
-    fn for_each_value_a<F>(
-        &mut self,
-        args: &[Node],
-        cell: CellReferenceIndex,
-        mut f: F,
-    ) -> Result<(), CalcResult>
-    where
-        F: FnMut(f64),
-    {
-        for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
-                CalcResult::Number(value) => {
-                    f(value);
-                }
-                CalcResult::Boolean(value) if !matches!(arg, Node::ReferenceKind { .. }) => {
-                    f(if value { 1.0 } else { 0.0 });
-                }
-                CalcResult::String(value) if !matches!(arg, Node::ReferenceKind { .. }) => {
-                    if let Some(parsed) = self.cast_number(&value) {
-                        f(parsed);
-                    } else {
-                        return Err(CalcResult::new_error(
-                            Error::VALUE,
-                            cell,
-                            "Argument cannot be cast into number".to_string(),
-                        ));
-                    }
-                }
-                CalcResult::Array(array) => {
-                    for row in array {
-                        for value in row {
-                            match value {
-                                ArrayNode::Number(value) => {
-                                    f(value);
-                                }
-                                ArrayNode::Boolean(b) => {
-                                    f(if b { 1.0 } else { 0.0 });
-                                }
-                                ArrayNode::String(_) => {
-                                    f(0.0);
-                                }
-                                ArrayNode::Error(error) => {
-                                    return Err(CalcResult::Error {
-                                        error,
-                                        origin: cell,
-                                        message: "Error in array".to_string(),
-                                    });
-                                }
-                                ArrayNode::Empty => {}
-                            }
-                        }
-                    }
-                }
-                CalcResult::Range { left, right } => {
-                    if left.sheet != right.sheet {
-                        return Err(CalcResult::new_error(
-                            Error::VALUE,
-                            cell,
-                            "Ranges are in different sheets".to_string(),
-                        ));
-                    }
-
-                    for row in left.row..=right.row {
-                        for column in left.column..=right.column {
-                            match self.evaluate_cell(CellReferenceIndex {
-                                sheet: left.sheet,
-                                row,
-                                column,
-                            }) {
-                                CalcResult::Number(value) => {
-                                    f(value);
-                                }
-                                CalcResult::Boolean(b) => {
-                                    f(if b { 1.0 } else { 0.0 });
-                                }
-                                CalcResult::String(_) => {
-                                    f(0.0);
-                                }
-                                error @ CalcResult::Error { .. } => return Err(error),
-                                CalcResult::Range { .. } => {
-                                    return Err(CalcResult::new_error(
-                                        Error::ERROR,
-                                        cell,
-                                        "Unexpected Range".to_string(),
-                                    ));
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-                error @ CalcResult::Error { .. } => return Err(error),
-                // Everything else is ignored
-                _ => {}
-            }
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn fn_average(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.is_empty() {
             return CalcResult::new_args_number_error(cell);
@@ -230,89 +132,11 @@ impl<'a> Model<'a> {
         }
         let mut count = 0.0;
         let mut sum = 0.0;
-        for arg in args {
-            match self.evaluate_node_in_context(arg, cell) {
-                CalcResult::Range { left, right } => {
-                    if left.sheet != right.sheet {
-                        return CalcResult::new_error(
-                            Error::VALUE,
-                            cell,
-                            "Ranges are in different sheets".to_string(),
-                        );
-                    }
-                    for row in left.row..(right.row + 1) {
-                        for column in left.column..(right.column + 1) {
-                            match self.evaluate_cell(CellReferenceIndex {
-                                sheet: left.sheet,
-                                row,
-                                column,
-                            }) {
-                                CalcResult::String(_) => count += 1.0,
-                                CalcResult::Number(value) => {
-                                    count += 1.0;
-                                    sum += value;
-                                }
-                                CalcResult::Boolean(b) => {
-                                    if b {
-                                        sum += 1.0;
-                                    }
-                                    count += 1.0;
-                                }
-                                error @ CalcResult::Error { .. } => return error,
-                                CalcResult::Range { .. } => {
-                                    return CalcResult::new_error(
-                                        Error::ERROR,
-                                        cell,
-                                        "Unexpected Range".to_string(),
-                                    );
-                                }
-                                CalcResult::EmptyCell | CalcResult::EmptyArg => {}
-                                CalcResult::Array(_) | CalcResult::Lambda(_) => {
-                                    return CalcResult::Error {
-                                        error: Error::NIMPL,
-                                        origin: cell,
-                                        message: "Arrays not supported yet".to_string(),
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                CalcResult::Number(value) => {
-                    count += 1.0;
-                    sum += value;
-                }
-                CalcResult::String(s) => {
-                    if let Node::ReferenceKind { .. } = arg {
-                        // Do nothing
-                        count += 1.0;
-                    } else if let Ok(t) = s.parse::<f64>() {
-                        sum += t;
-                        count += 1.0;
-                    } else {
-                        return CalcResult::Error {
-                            error: Error::VALUE,
-                            origin: cell,
-                            message: "Argument cannot be cast into number".to_string(),
-                        };
-                    }
-                }
-                CalcResult::Boolean(b) => {
-                    count += 1.0;
-                    if b {
-                        sum += 1.0;
-                    }
-                }
-                error @ CalcResult::Error { .. } => return error,
-                CalcResult::EmptyCell | CalcResult::EmptyArg => {}
-                CalcResult::Array(_) | CalcResult::Lambda(_) => {
-                    return CalcResult::Error {
-                        error: Error::NIMPL,
-                        origin: cell,
-                        message: "Arrays not supported yet".to_string(),
-                    }
-                }
-            };
+        if let Err(e) = self.for_each_value_a(args, cell, ArrayValues::Unsupported, |f| {
+            count += 1.0;
+            sum += f;
+        }) {
+            return e;
         }
         if count == 0.0 {
             return CalcResult::Error {
@@ -661,7 +485,7 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let mut mina: Option<f64> = None;
-        if let Err(e) = self.for_each_value_a(args, cell, |f| {
+        if let Err(e) = self.for_each_value_a(args, cell, ArrayValues::TextAsZero, |f| {
             if let Some(m) = mina {
                 mina = Some(m.min(f));
             } else {
@@ -686,7 +510,7 @@ impl<'a> Model<'a> {
             return CalcResult::new_args_number_error(cell);
         }
         let mut maxa: Option<f64> = None;
-        if let Err(e) = self.for_each_value_a(args, cell, |f| {
+        if let Err(e) = self.for_each_value_a(args, cell, ArrayValues::TextAsZero, |f| {
             if let Some(m) = maxa {
                 maxa = Some(m.max(f));
             } else {
