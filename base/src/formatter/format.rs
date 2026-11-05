@@ -7,6 +7,34 @@ use super::{
     parser::{ParsePart, Parser, TextToken},
 };
 
+const SECONDS_PER_DAY: i64 = 86_400;
+
+/// IronXL: the serial `value` as a count of whole seconds, rounded to the nearest second.
+fn whole_seconds(value: f64) -> i64 {
+    (value * SECONDS_PER_DAY as f64).round() as i64
+}
+
+/// IronXL: true for a token that shows a part of the time of day or an elapsed time.
+fn is_time_token(token: &TextToken) -> bool {
+    matches!(
+        token,
+        TextToken::Hour
+            | TextToken::HourPadded
+            | TextToken::Minute
+            | TextToken::MinutePadded
+            | TextToken::Second
+            | TextToken::SecondPadded
+            | TextToken::ElapsedHour
+            | TextToken::ElapsedHourPadded
+            | TextToken::ElapsedMinute
+            | TextToken::ElapsedMinutePadded
+            | TextToken::ElapsedSecond
+            | TextToken::ElapsedSecondPadded
+            | TextToken::AMPM
+            | TextToken::AP(_)
+    )
+}
+
 pub struct Formatted {
     pub color: Option<i32>,
     pub text: String,
@@ -178,11 +206,20 @@ pub fn format_number_with_date_system(
         ParsePart::Date(p) => {
             let tokens = &p.tokens;
             let mut text = "".to_string();
-            let time_fract = value.fract();
-            let hours = (time_fract * 24.0).floor();
-            let minutes = ((time_fract * 24.0 - hours) * 60.0).floor();
-            let seconds = ((((time_fract * 24.0 - hours) * 60.0) - minutes) * 60.0).round();
-            let date = from_excel_date(value as i64, date_system).ok();
+            // IronXL: a section with a time part rounds the value to whole seconds once. Each
+            // part reads this count, so a carry goes to the minute, the hour, and the day, and
+            // `:60` does not occur. An elapsed code counts in i64, so it does not clamp.
+            let (day, elapsed_seconds) = if tokens.iter().any(is_time_token) {
+                let elapsed_seconds = whole_seconds(value);
+                (elapsed_seconds.div_euclid(SECONDS_PER_DAY), elapsed_seconds)
+            } else {
+                (value as i64, 0)
+            };
+            let second_of_day = elapsed_seconds.rem_euclid(SECONDS_PER_DAY);
+            let hours = second_of_day / 3600;
+            let minutes = second_of_day / 60 % 60;
+            let seconds = second_of_day % 60;
+            let date = from_excel_date(day, date_system).ok();
             for token in tokens {
                 match token {
                     TextToken::Literal(c) => {
@@ -365,7 +402,7 @@ pub fn format_number_with_date_system(
                         text = format!("{}{}", text, date.year());
                     }
                     TextToken::Hour => {
-                        let mut hour = hours as i32;
+                        let mut hour = hours;
                         if p.use_ampm {
                             if hour == 0 {
                                 hour = 12;
@@ -376,7 +413,7 @@ pub fn format_number_with_date_system(
                         text = format!("{text}{hour}");
                     }
                     TextToken::HourPadded => {
-                        let mut hour = hours as i32;
+                        let mut hour = hours;
                         if p.use_ampm {
                             if hour == 0 {
                                 hour = 12;
@@ -387,19 +424,19 @@ pub fn format_number_with_date_system(
                         text = format!("{text}{hour:02}");
                     }
                     TextToken::Second => {
-                        let second = seconds as i32;
+                        let second = seconds;
                         text = format!("{text}{second}");
                     }
                     TextToken::SecondPadded => {
-                        let second = seconds as i32;
+                        let second = seconds;
                         text = format!("{text}{second:02}");
                     }
                     TextToken::AMPM => {
-                        let ampm = if hours < 12.0 { "AM" } else { "PM" };
+                        let ampm = if hours < 12 { "AM" } else { "PM" };
                         text = format!("{text}{ampm}");
                     }
                     TextToken::AP(lower) => {
-                        let ap = match (hours < 12.0, lower) {
+                        let ap = match (hours < 12, lower) {
                             (true, false) => "A",
                             (false, false) => "P",
                             (true, true) => "a",
@@ -408,35 +445,35 @@ pub fn format_number_with_date_system(
                         text = format!("{text}{ap}");
                     }
                     TextToken::Minute => {
-                        let minute = minutes as i32;
+                        let minute = minutes;
                         text = format!("{text}{minute}");
                     }
                     TextToken::MinutePadded => {
-                        let minute = minutes as i32;
+                        let minute = minutes;
                         text = format!("{text}{minute:02}");
                     }
                     TextToken::ElapsedHour => {
-                        let hour = (value * 24.0).floor() as i32;
+                        let hour = elapsed_seconds / 3600;
                         text = format!("{text}{hour}");
                     }
                     TextToken::ElapsedHourPadded => {
-                        let hour = (value * 24.0).floor() as i32;
+                        let hour = elapsed_seconds / 3600;
                         text = format!("{text}{hour:02}");
                     }
                     TextToken::ElapsedMinute => {
-                        let minute = (value * 24.0 * 60.0).floor() as i32;
+                        let minute = elapsed_seconds / 60;
                         text = format!("{text}{minute}");
                     }
                     TextToken::ElapsedMinutePadded => {
-                        let minute = (value * 24.0 * 60.0).floor() as i32;
+                        let minute = elapsed_seconds / 60;
                         text = format!("{text}{minute:02}");
                     }
                     TextToken::ElapsedSecond => {
-                        let second = (value * 24.0 * 60.0 * 60.0).floor() as i32;
+                        let second = elapsed_seconds;
                         text = format!("{text}{second}");
                     }
                     TextToken::ElapsedSecondPadded => {
-                        let second = (value * 24.0 * 60.0 * 60.0).floor() as i32;
+                        let second = elapsed_seconds;
                         text = format!("{text}{second:02}");
                     }
                 }
