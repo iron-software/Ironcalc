@@ -70,3 +70,86 @@ fn elapsed_hour_padded() {
     let formatted = format_number(value, format, locale);
     assert_eq!(formatted.text, "02:24:00");
 }
+
+// IronXL: a section with a time part rounds the value to whole seconds once, with a carry to
+// the minute, the hour, and the day. An elapsed code counts in i64 and does not clamp.
+
+#[test]
+fn elapsed_codes_of_a_large_value_round_to_a_whole_second() {
+    let locale = get_default_locale();
+    let value = 45000.545185185;
+    assert_eq!(format_number(value, "[ss]", locale).text, "3888047104");
+    assert_eq!(format_number(value, "[s]", locale).text, "3888047104");
+    assert_eq!(format_number(value, "[h]", locale).text, "1080013");
+    assert_eq!(format_number(value, "[hh]", locale).text, "1080013");
+    assert_eq!(format_number(value, "[mm]", locale).text, "64800785");
+    assert_eq!(format_number(value, "[m]", locale).text, "64800785");
+    assert_eq!(format_number(1234.5, "[ss]", locale).text, "106660800");
+}
+
+#[test]
+fn elapsed_codes_of_the_last_excel_date_do_not_clamp() {
+    let locale = get_default_locale();
+    let value = 2958465.9999884;
+    assert_eq!(format_number(value, "[s]", locale).text, "255611462399");
+    assert_eq!(format_number(value, "[ss]", locale).text, "255611462399");
+    assert_eq!(format_number(value, "[mm]", locale).text, "4260191039");
+    assert_eq!(format_number(value, "[m]", locale).text, "4260191039");
+    assert_eq!(format_number(value, "[h]", locale).text, "71003183");
+    assert_eq!(format_number(value, "[hh]", locale).text, "71003183");
+}
+
+#[test]
+fn a_time_section_carries_a_rounded_second_to_the_minute_the_hour_and_the_day() {
+    let locale = get_default_locale();
+    let value = 0.9999999;
+    assert_eq!(format_number(value, "[h]:mm:ss", locale).text, "24:00:00");
+    assert_eq!(format_number(value, "h:mm:ss", locale).text, "0:00:00");
+    assert_eq!(
+        format_number(value, "hh:mm:ss AM/PM", locale).text,
+        "12:00:00 AM"
+    );
+    assert_eq!(format_number(value, "[s]", locale).text, "86400");
+    assert_eq!(format_number(value, "[m]", locale).text, "1440");
+    assert_eq!(format_number(value, "[mm]:ss", locale).text, "1440:00");
+    assert_eq!(
+        format_number(45000.9999999, "d h:mm:ss", locale).text,
+        "16 0:00:00"
+    );
+    assert_eq!(
+        format_number(45000.9999999, "yyyy-mm-dd hh:mm:ss", locale).text,
+        "2023-03-16 00:00:00"
+    );
+    // 12:29:59.6 rounds to 12:30:00
+    let value = (12.0 * 3600.0 + 29.0 * 60.0 + 59.6) / 86400.0;
+    assert_eq!(format_number(value, "h:mm:ss", locale).text, "12:30:00");
+    assert_eq!(format_number(value, "h:mm", locale).text, "12:30");
+}
+
+#[test]
+fn larger_units_and_a_section_without_a_time_part_do_not_round() {
+    let locale = get_default_locale();
+    assert_eq!(format_number(0.52, "h:mm", locale).text, "12:28");
+    // 12:29:40 shows 12:29 with h:mm
+    let value = (12.0 * 3600.0 + 29.0 * 60.0 + 40.0) / 86400.0;
+    assert_eq!(format_number(value, "h:mm", locale).text, "12:29");
+    assert_eq!(format_number(value, "[h]", locale).text, "12");
+    assert_eq!(format_number(45000.9999999, "d", locale).text, "15");
+    assert_eq!(
+        format_number(45000.9999999, "yyyy-mm-dd", locale).text,
+        "2023-03-15"
+    );
+}
+
+#[test]
+fn every_time_code_reads_the_same_rounded_second() {
+    let locale = get_default_locale();
+    // 23:59:59.5 rounds to the next day
+    let value = 45000.0 + 86399.5 / 86400.0;
+    assert_eq!(format_number(value, "d h", locale).text, "16 0");
+    assert_eq!(format_number(value, "d h AM/PM", locale).text, "16 12 AM");
+    assert_eq!(format_number(value, "d h A/P", locale).text, "16 12 A");
+    assert_eq!(format_number(value, "d hh a/p", locale).text, "16 12 a");
+    assert_eq!(format_number(value, "d m:ss", locale).text, "16 0:00");
+    assert_eq!(format_number(value, "d [hh]", locale).text, "16 1080024");
+}
