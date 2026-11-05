@@ -1,3 +1,4 @@
+mod a_arguments;
 mod beta;
 mod binom;
 mod chisq;
