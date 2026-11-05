@@ -153,3 +153,84 @@ fn every_time_code_reads_the_same_rounded_second() {
     assert_eq!(format_number(value, "d m:ss", locale).text, "16 0:00");
     assert_eq!(format_number(value, "d [hh]", locale).text, "16 1080024");
 }
+
+// IronXL: `.` and 1 to 3 `0` right after s, ss, [s], or [ss] are the digits after the seconds.
+// The section rounds the value once to these digits, with a carry to the larger units.
+
+#[test]
+fn digits_after_the_seconds_show_the_fraction_of_a_second() {
+    let locale = get_default_locale();
+    let cases = [
+        (0.5000028935185185, "h:mm:ss.000", "12:00:00.250"),
+        (0.5000028935185185, "H:MM:SS.000", "12:00:00.250"),
+        (45000.545185185, "[ss].00", "3888047104.00"),
+        (45000.545185185, "[s].0", "3888047104.0"),
+        (0.5 + 1.25 / 86400.0, "mm:ss.0", "00:01.3"),
+        (0.5 + 1.5 / 86400.0, "[ss].00", "43201.50"),
+        (0.5 + 1.5 / 86400.0, "s.0", "1.5"),
+        (0.5 + 1.5 / 86400.0, "[SS].00", "43201.50"),
+        (0.99999, "[h]:mm:ss.0", "23:59:59.1"),
+        (0.5 + 1.5 / 86400.0, "h:mm:ss.0 AM/PM", "12:00:01.5 PM"),
+        (0.5 + 1.5 / 86400.0, "ss.0 \"s\"", "01.5 s"),
+    ];
+    for (value, format, expected) in cases {
+        let formatted = format_number(value, format, locale);
+        assert_eq!(formatted.text, expected, "{format}");
+        assert_eq!(formatted.error, None, "{format}");
+    }
+}
+
+#[test]
+fn digits_after_the_seconds_round_once_with_a_carry() {
+    let locale = get_default_locale();
+    let cases = [
+        (0.9999999999, "h:mm:ss.00", "0:00:00.00"),
+        (0.9999999999, "[h]:mm:ss.00", "24:00:00.00"),
+        (45000.9999999999, "d h:mm:ss.000", "16 0:00:00.000"),
+        (0.5 + 59.96 / 86400.0, "mm:ss.0", "01:00.0"),
+    ];
+    for (value, format, expected) in cases {
+        let formatted = format_number(value, format, locale);
+        assert_eq!(formatted.text, expected, "{format}");
+    }
+}
+
+#[test]
+fn a_section_with_more_digit_parts_rounds_to_the_largest_count() {
+    let locale = get_default_locale();
+    let value = 0.5 + 1.256 / 86400.0;
+    let formatted = format_number(value, "ss.0 ss.000", locale);
+    assert_eq!(formatted.text, "01.2 01.256");
+}
+
+#[test]
+fn other_zeros_in_a_time_section_stay_invalid() {
+    let locale = get_default_locale();
+    for format in [
+        "h:mm:ss.0000",
+        "h:mm:ss0",
+        "h:mm.0",
+        "h:mm:ss 0",
+        "h:mm:ss.000.0",
+    ] {
+        let formatted = format_number(0.5, format, locale);
+        assert_eq!(formatted.text, "#VALUE!", "{format}");
+    }
+}
+
+#[test]
+fn codes_without_digits_after_the_seconds_keep_their_text() {
+    let locale = get_default_locale();
+    let cases = [
+        (0.5, "h:mm:ss", "12:00:00"),
+        (0.5, "h:mm:ss.", "12:00:00."),
+        (0.5, "h:mm:ss.\"x\"", "12:00:00.x"),
+        (1.5, "0.00", "1.50"),
+        (0.5, "h:mm:ss.000;0.00", "12:00:00.000"),
+        (-1.5, "h:mm:ss.000;0.00", "1.50"),
+    ];
+    for (value, format, expected) in cases {
+        let formatted = format_number(value, format, locale);
+        assert_eq!(formatted.text, expected, "{format}");
+    }
+}
