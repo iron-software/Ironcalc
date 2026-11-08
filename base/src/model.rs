@@ -363,9 +363,10 @@ impl<'a> Model<'a> {
     }
 
     /// IronXL: evaluates a node that a function reads as a reference, as in Excel: the range
-    /// operator, `CELL`, `ISFORMULA`, and `FORMULATEXT`. `INDEX` with a reference gives a range,
-    /// also a range of one cell. Each other node gives the result of
-    /// `evaluate_node_with_reference`, so `@`, `#`, and `CHOOSE` keep the value of `INDEX`.
+    /// operator, `CELL`, `ISFORMULA`, and `FORMULATEXT`. `INDEX` with a reference, and `IF` with
+    /// a scalar condition and a chosen reference, give a range, also a range of one cell. Each
+    /// other node gives the result of `evaluate_node_with_reference`, so `@`, `#`, and `CHOOSE`
+    /// keep the value of `INDEX` and `IF`.
     pub(crate) fn evaluate_reference_node(
         &mut self,
         node: &Node,
@@ -373,7 +374,7 @@ impl<'a> Model<'a> {
     ) -> CalcResult {
         match node {
             Node::FunctionKind {
-                kind: Function::Index,
+                kind: Function::Index | Function::If,
                 ..
             } => self.evaluate_reference_argument(node, cell),
             _ => self.evaluate_node_with_reference(node, cell),
@@ -381,8 +382,9 @@ impl<'a> Model<'a> {
     }
 
     /// IronXL: evaluates an argument that a function reads as a reference, as in Excel.
-    /// `INDEX` with a reference gives a range, also a range of one cell. Each other node gives
-    /// the result of `evaluate_node_in_context`.
+    /// `INDEX` with a reference, and `IF` with a scalar condition and a chosen reference, give a
+    /// range, also a range of one cell. Each other node gives the result of
+    /// `evaluate_node_in_context`.
     pub(crate) fn evaluate_reference_argument(
         &mut self,
         node: &Node,
@@ -393,6 +395,10 @@ impl<'a> Model<'a> {
                 kind: Function::Index,
                 args,
             } => self.index_reference(args, cell),
+            Node::FunctionKind {
+                kind: Function::If,
+                args,
+            } => self.if_reference(args, cell),
             _ => self.evaluate_node_in_context(node, cell),
         }
     }
