@@ -234,3 +234,59 @@ fn codes_without_digits_after_the_seconds_keep_their_text() {
         assert_eq!(formatted.text, expected, "{format}");
     }
 }
+
+// IronXL: a date or time section shows a serial from 0 to 31 December 9999. A negative serial,
+// and a serial after 31 December 9999 also after the rounding, give #VALUE!, as Excel gives.
+
+#[test]
+fn a_negative_serial_in_a_date_or_time_section_gives_an_error() {
+    let locale = get_default_locale();
+    for format in ["h:mm", "[h]:mm", "d", "[s]", "h:mm:ss.0"] {
+        let formatted = format_number(-0.25, format, locale);
+        assert_eq!(formatted.text, "#VALUE!", "{format}");
+        assert!(formatted.error.is_some(), "{format}");
+    }
+}
+
+#[test]
+fn a_negative_section_shows_the_absolute_value() {
+    let locale = get_default_locale();
+    assert_eq!(format_number(-0.25, "h:mm;h:mm", locale).text, "6:00");
+    assert_eq!(format_number(-0.25, "h:mm;[h]:mm;0", locale).text, "6:00");
+    assert_eq!(format_number(0.0, "h:mm;h:mm", locale).text, "0:00");
+}
+
+#[test]
+fn a_serial_after_the_last_date_gives_an_error() {
+    let locale = get_default_locale();
+    let cases = [
+        (110_000_000_000_000.0, "h:mm"),
+        (110_000_000_000_000.0, "d"),
+        (2_958_466.0, "h:mm"),
+        (2_958_466.0, "[s]"),
+        (2_958_466.0, "m/d/yyyy"),
+        (2_958_465.999_999_9, "[s]"),
+        (2_958_465.999_999_9, "[s].0"),
+        (2_958_465.999_999_9, "h:mm:ss"),
+    ];
+    for (value, format) in cases {
+        let formatted = format_number(value, format, locale);
+        assert_eq!(formatted.text, "#VALUE!", "{value} {format}");
+    }
+}
+
+#[test]
+fn the_last_date_keeps_its_text() {
+    let locale = get_default_locale();
+    let cases = [
+        (2_958_465.999_999_9, "d", "31"),
+        (2_958_465.999_99, "[s].0", "255611462399.1"),
+        (2_958_465.0, "m/d/yyyy", "12/31/9999"),
+        (2_958_465.5, "m/d/yyyy h:mm", "12/31/9999 12:00"),
+        (0.0, "h:mm", "0:00"),
+    ];
+    for (value, format, expected) in cases {
+        let formatted = format_number(value, format, locale);
+        assert_eq!(formatted.text, expected, "{value} {format}");
+    }
+}

@@ -15,6 +15,41 @@ fn whole_units(value: f64, units_per_day: i64) -> i64 {
     (value * units_per_day as f64).round() as i64
 }
 
+/// IronXL: the 1900 serial of the fictional 29 February 1900. Before it, Excel counts one day more
+/// than the dates of the engine.
+const FEBRUARY_29_1900: i64 = 60;
+
+/// IronXL: true when a date or time section can show the serial `value` with the rounded `day`:
+/// the value is not negative, and the value and the day are not after 31 December 9999.
+fn is_shown_serial(value: f64, day: i64, date_system: DateSystem) -> bool {
+    let end = date_system.maximum_serial() as i64 + 1;
+    (0.0..end as f64).contains(&value) && day < end
+}
+
+/// IronXL: the engine serial of the date that a date section shows for `day`. In the 1900 date
+/// system, Excel shows serial 0 as 31 December 1899, serial 1 as 1 January 1900, and serial 60
+/// as 28 February 1900, so a day before 60 reads the date of the next engine serial.
+fn shown_date_serial(day: i64, date_system: DateSystem) -> i64 {
+    if date_system == DateSystem::Date1900 && day < FEBRUARY_29_1900 {
+        day + 1
+    } else {
+        day
+    }
+}
+
+/// IronXL: the weekday that a date section shows for `day` and its shown `date`, from 0 for Sunday
+/// to 6 for Saturday. Excel counts the fictional 29 February 1900, so in the 1900 date system the
+/// weekday of a day before 60 is one day before the weekday of the shown date: serial 1 is a
+/// Sunday, as WEEKDAY(1) of Excel gives.
+fn shown_weekday(date: chrono::NaiveDate, day: i64, date_system: DateSystem) -> usize {
+    let weekday = date.weekday().num_days_from_sunday() as usize;
+    if date_system == DateSystem::Date1900 && day < FEBRUARY_29_1900 {
+        (weekday + 6) % 7
+    } else {
+        weekday
+    }
+}
+
 /// IronXL: true for a token that shows a part of the time of day or an elapsed time.
 fn is_time_token(token: &TextToken) -> bool {
     matches!(
@@ -228,12 +263,21 @@ pub fn format_number_with_date_system(
             } else {
                 (value as i64, 0)
             };
+            // IronXL: a negative serial, and a serial after 31 December 9999 also after the
+            // rounding, give #VALUE!, as Excel gives. The display text shows the General text.
+            if !is_shown_serial(value, day, date_system) {
+                return Formatted {
+                    text: "#VALUE!".to_owned(),
+                    color: None,
+                    error: Some(format!("Invalid date value: '{value}'")),
+                };
+            }
             let elapsed_seconds = units.div_euclid(units_per_second);
             let second_of_day = elapsed_seconds.rem_euclid(SECONDS_PER_DAY);
             let hours = second_of_day / 3600;
             let minutes = second_of_day / 60 % 60;
             let seconds = second_of_day % 60;
-            let date = from_excel_date(day, date_system).ok();
+            let date = from_excel_date(shown_date_serial(day, date_system), date_system).ok();
             for token in tokens {
                 match token {
                     TextToken::Literal(c) => {
@@ -295,10 +339,7 @@ pub fn format_number_with_date_system(
                                 }
                             }
                         };
-                        let mut day = date.weekday().number_from_monday() as usize;
-                        if day == 7 {
-                            day = 0;
-                        }
+                        let day = shown_weekday(date, day, date_system);
                         text = format!("{}{}", text, locale.dates.day_names_short[day]);
                     }
                     TextToken::DayName => {
@@ -312,10 +353,7 @@ pub fn format_number_with_date_system(
                                 }
                             }
                         };
-                        let mut day = date.weekday().number_from_monday() as usize;
-                        if day == 7 {
-                            day = 0;
-                        }
+                        let day = shown_weekday(date, day, date_system);
                         text = format!("{}{}", text, locale.dates.day_names[day]);
                     }
                     TextToken::Month => {
