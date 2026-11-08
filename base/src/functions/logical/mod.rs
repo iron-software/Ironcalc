@@ -109,6 +109,37 @@ impl<'a> Model<'a> {
     }
 
     pub(crate) fn fn_if(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.evaluate_if(args, cell, Self::evaluate_node_in_context)
+    }
+
+    /// IronXL: evaluates IF as a reference, as in Excel. With a scalar condition, IF gives the
+    /// reference of its chosen argument, also a range of one cell. A function that reads a
+    /// reference argument uses this result, so it reads `IF(TRUE,B1)` as it reads `B1`. An array
+    /// condition gives the array of `fn_if`.
+    pub(crate) fn if_reference(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.evaluate_if(args, cell, Self::evaluate_if_reference_branch)
+    }
+
+    /// Evaluates the chosen argument of `if_reference`. A direct reference gives a range of one
+    /// cell. `INDEX` and `IF` give their reference. Each other node gives its value.
+    fn evaluate_if_reference_branch(
+        &mut self,
+        node: &Node,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        match node {
+            Node::ReferenceKind { .. } => self.evaluate_lookup_vector_node(node, cell),
+            _ => self.evaluate_reference_argument(node, cell),
+        }
+    }
+
+    /// Evaluates IF. `branch` evaluates the chosen argument of a scalar condition.
+    fn evaluate_if(
+        &mut self,
+        args: &[Node],
+        cell: CellReferenceIndex,
+        branch: fn(&mut Self, &Node, CellReferenceIndex) -> CalcResult,
+    ) -> CalcResult {
         if args.len() != 2 && args.len() != 3 {
             return CalcResult::new_args_number_error(cell);
         }
@@ -128,9 +159,9 @@ impl<'a> Model<'a> {
                     Err(e) => return e,
                 };
                 return if b {
-                    self.evaluate_node_in_context(&args[1], cell)
+                    branch(self, &args[1], cell)
                 } else if has_else {
-                    self.evaluate_node_in_context(&args[2], cell)
+                    branch(self, &args[2], cell)
                 } else {
                     CalcResult::Boolean(false)
                 };
