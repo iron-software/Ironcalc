@@ -195,21 +195,20 @@ fn test_date_early_dates() {
 
     model.evaluate();
 
-    // This is 1 in Excel, we agree with Google Docs
-    // IronXL: the text shows serial 2 as 2 January 1900, as Excel shows it (IronXL ADR 029,
+    // IronXL: serial 1 is 1 January 1900, as in Excel (IronXL ADR 029,
     // docs/adr/029-spreadsheet-processor-date-systems-and-date-parts.md).
-    assert_eq!(model._get_text("A1"), *"1/2/1900");
+    assert_eq!(model._get_text("A1"), *"1/1/1900");
     assert_eq!(
         model.get_cell_value_by_ref("Sheet1!A1"),
-        Ok(CellValue::Number(2.0))
+        Ok(CellValue::Number(1.0))
     );
 
-    // 1900 was not a leap year, this is a bug in EXCEL
-    // This would be 60 in Excel
+    // IronXL: Excel counts the fictional 29 February 1900 as serial 60, so 28 February 1900 is
+    // serial 59, as in Excel (IronXL ADR 029).
     assert_eq!(model._get_text("A2"), *"2/28/1900");
     assert_eq!(
         model.get_cell_value_by_ref("Sheet1!A2"),
-        Ok(CellValue::Number(60.0))
+        Ok(CellValue::Number(59.0))
     );
 
     // This does not agree with Excel, instead of mistakenly allowing

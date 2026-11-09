@@ -15,7 +15,7 @@
 
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU64, Ordering};
 
-use crate::constants::EXCEL_DATE_BASE;
+use crate::formatter::dates::{serial_from_date, DateSystem};
 
 static CLOCK_MS: AtomicI64 = AtomicI64::new(0);
 static LOCAL_OFFSET_MINUTES: AtomicI32 = AtomicI32::new(0);
@@ -79,13 +79,13 @@ fn xorshift64_star(state: u64) -> (u64, f64) {
 
 /// The Excel serial number of `ms` (milliseconds since the Unix epoch) at a fixed UTC offset.
 pub(crate) fn excel_serial(ms: i64, offset_minutes: i32) -> Option<f64> {
-    use chrono::{DateTime, Datelike, Timelike};
+    use chrono::{DateTime, Timelike};
     // Whole seconds, as the native path does.
     let local_seconds = ms
         .div_euclid(1000)
         .checked_add(i64::from(offset_minutes) * 60)?;
     let dt = DateTime::from_timestamp(local_seconds, 0)?;
-    let days = dt.num_days_from_ce() - EXCEL_DATE_BASE;
+    let days = serial_from_date(dt.date_naive(), DateSystem::Date1900);
     Some(f64::from(days) + f64::from(dt.num_seconds_from_midnight()) / 86400.0)
 }
 

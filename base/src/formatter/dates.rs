@@ -2,6 +2,7 @@ use chrono::Datelike;
 use chrono::Days;
 use chrono::Months;
 use chrono::NaiveDate;
+use chrono::Weekday;
 
 use crate::constants::DATE_1904_OFFSET;
 use crate::constants::EXCEL_DATE_BASE;
@@ -66,10 +67,64 @@ impl DateSystem {
     }
 }
 
+/// IronXL: the 1900 serial of the fictional 29 February 1900. Excel counts this day, so a date
+/// before 1 March 1900 has a serial one lower than a day count from 30 December 1899 gives.
+const FEBRUARY_29_1900: i64 = 60;
+
 /// Converts a date to its serial number in the date system.
+///
+/// IronXL: in the 1900 date system, a date before 1 March 1900 counts the days from
+/// 31 December 1899, as Excel does (IronXL ADR 029).
 #[inline]
 pub fn serial_from_date(date: NaiveDate, date_system: DateSystem) -> i32 {
-    date.num_days_from_ce() - date_system.base()
+    let days = date.num_days_from_ce() - date_system.base();
+    if date_system == DateSystem::Date1900 && (days as i64) <= FEBRUARY_29_1900 {
+        days - 1
+    } else {
+        days
+    }
+}
+
+/// IronXL: the date of a serial number, with no range check. In the 1900 date system, a serial
+/// below 60 counts the days from 31 December 1899, and serial 60, the fictional 29 February 1900,
+/// is 28 February 1900. So serial 0 is 31 December 1899 and serial 1 is 1 January 1900
+/// (IronXL ADR 029).
+pub(crate) fn date_of_serial(days: i64, date_system: DateSystem) -> Option<NaiveDate> {
+    let days = if date_system == DateSystem::Date1900 && days <= FEBRUARY_29_1900 {
+        (days + 1).min(FEBRUARY_29_1900)
+    } else {
+        days
+    };
+    let days = i32::try_from(days).ok()?.checked_add(date_system.base())?;
+    NaiveDate::from_num_days_from_ce_opt(days)
+}
+
+/// IronXL: the weekday of a serial number, as Excel gives it. Excel counts the fictional
+/// 29 February 1900, so in the 1900 date system serial 0 is a Saturday and serial 1 a Sunday.
+/// From serial 61, and in the 1904 date system, the weekday is the weekday of the date.
+pub fn weekday_of_serial(days: i64, date_system: DateSystem) -> Weekday {
+    const WEEKDAYS: [Weekday; 7] = [
+        Weekday::Mon,
+        Weekday::Tue,
+        Weekday::Wed,
+        Weekday::Thu,
+        Weekday::Fri,
+        Weekday::Sat,
+        Weekday::Sun,
+    ];
+    // Day 1 of the common era, 1 January of year 1, is a Monday.
+    let days_from_monday = (date_system.base() as i64 - 1 + days.rem_euclid(7)).rem_euclid(7);
+    WEEKDAYS[days_from_monday as usize]
+}
+
+/// IronXL: the ISO week number of a serial number, with the weekday of Excel. The week holds
+/// the Thursday that gives the year of the week.
+pub fn iso_week_of_serial(days: i64, date_system: DateSystem) -> Option<u32> {
+    let monday = days - weekday_of_serial(days, date_system).num_days_from_monday() as i64;
+    let thursday = monday + 3;
+    let year = date_of_serial(thursday, date_system)?.year();
+    let first_day = serial_from_date(NaiveDate::from_ymd_opt(year, 1, 1)?, date_system) as i64;
+    Some(((thursday - first_day) / 7 + 1) as u32)
 }
 
 fn is_date_within_range(date: NaiveDate, date_system: DateSystem) -> bool {
@@ -87,8 +142,7 @@ pub fn from_excel_date(days: i64, date_system: DateSystem) -> Result<NaiveDate, 
         return Err(format!("Excel date must be less than {maximum}"));
     };
     #[allow(clippy::expect_used)]
-    let dt = NaiveDate::from_num_days_from_ce_opt(date_system.base() + days as i32)
-        .expect("problem with chrono::NaiveDate");
+    let dt = date_of_serial(days, date_system).expect("problem with chrono::NaiveDate");
     Ok(dt)
 }
 
@@ -126,10 +180,6 @@ pub fn permissive_date_to_serial_number(
     // This function applies that same logic to dates. And does it in the most compatible way as
     // possible.
 
-    // Special case for the minimum date
-    if date_system == DateSystem::Date1900 && year == 1899 && month == 12 && day == 31 {
-        return Ok(MINIMUM_DATE_SERIAL_NUMBER);
-    }
     let Some(mut date) = NaiveDate::from_ymd_opt(year, 1, 1) else {
         return Err(DATE_OUT_OF_RANGE_MESSAGE.to_string());
     };
@@ -224,10 +274,45 @@ mod tests {
             permissive_date_to_serial_number(31, 12, 9999, DateSystem::Date1900),
             Ok(MAXIMUM_DATE_SERIAL_NUMBER),
         );
+        // IronXL: serial 1 is 1 January 1900 and 31 December 1899 is serial 0, below the
+        // minimum (IronXL ADR 029).
         assert_eq!(
-            permissive_date_to_serial_number(31, 12, 1899, DateSystem::Date1900),
+            permissive_date_to_serial_number(1, 1, 1900, DateSystem::Date1900),
             Ok(MINIMUM_DATE_SERIAL_NUMBER),
         );
+        assert!(permissive_date_to_serial_number(31, 12, 1899, DateSystem::Date1900).is_err());
+    }
+
+    // IronXL: the 1900 serials of Excel before 1 March 1900 (IronXL ADR 029).
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_serials_before_march_1900() {
+        let date_1900 = DateSystem::Date1900;
+        let date = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).unwrap();
+        assert_eq!(serial_from_date(date(1899, 12, 31), date_1900), 0);
+        assert_eq!(serial_from_date(date(1900, 1, 1), date_1900), 1);
+        assert_eq!(serial_from_date(date(1900, 2, 28), date_1900), 59);
+        assert_eq!(serial_from_date(date(1900, 3, 1), date_1900), 61);
+        assert_eq!(date_of_serial(-1, date_1900), Some(date(1899, 12, 30)));
+        assert_eq!(date_of_serial(0, date_1900), Some(date(1899, 12, 31)));
+        assert_eq!(date_of_serial(1, date_1900), Some(date(1900, 1, 1)));
+        assert_eq!(date_of_serial(59, date_1900), Some(date(1900, 2, 28)));
+        assert_eq!(date_of_serial(60, date_1900), Some(date(1900, 2, 28)));
+        assert_eq!(date_of_serial(61, date_1900), Some(date(1900, 3, 1)));
+        assert_eq!(date_of_serial(i64::MAX, date_1900), None);
+        assert_eq!(from_excel_date(1, date_1900), Ok(date(1900, 1, 1)));
+        assert!(from_excel_date(0, date_1900).is_err());
+        assert_eq!(weekday_of_serial(0, date_1900), Weekday::Sat);
+        assert_eq!(weekday_of_serial(1, date_1900), Weekday::Sun);
+        assert_eq!(weekday_of_serial(59, date_1900), Weekday::Tue);
+        assert_eq!(weekday_of_serial(60, date_1900), Weekday::Wed);
+        assert_eq!(weekday_of_serial(61, date_1900), Weekday::Thu);
+        assert_eq!(weekday_of_serial(-1, date_1900), Weekday::Fri);
+        assert_eq!(iso_week_of_serial(1, date_1900), Some(52));
+        assert_eq!(iso_week_of_serial(2, date_1900), Some(1));
+        assert_eq!(iso_week_of_serial(i64::MAX - 7, date_1900), None);
+        assert_eq!(weekday_of_serial(0, DateSystem::Date1904), Weekday::Fri);
+        assert_eq!(iso_week_of_serial(0, DateSystem::Date1904), Some(53));
     }
 
     #[test]
@@ -241,9 +326,10 @@ mod tests {
         );
         assert!(NaiveDate::from_ymd_opt(1904, 1, 1).is_some());
         assert!(date_to_serial_number(31, 12, 1903, date_1904).is_err());
+        // IronXL: a date before 1 March 1900 counts the days from 31 December 1899 (IronXL ADR 029).
         assert_eq!(
             date_to_serial_number(31, 12, 1898, DateSystem::Date1900),
-            Ok(-364)
+            Ok(-365)
         );
         assert!(from_excel_date(-1, date_1904).is_err());
         assert!(from_excel_date(date_1904.maximum_serial() as i64 + 1, date_1904).is_err());

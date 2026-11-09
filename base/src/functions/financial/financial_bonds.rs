@@ -2,9 +2,8 @@ use chrono::{Datelike, Months, NaiveDate};
 
 use crate::{
     calc_result::CalcResult,
-    constants::EXCEL_DATE_BASE,
     expressions::{parser::Node, token::Error, types::CellReferenceIndex},
-    formatter::dates::{from_excel_date, DateSystem},
+    formatter::dates::{from_excel_date, serial_from_date, DateSystem},
     model::Model,
 };
 
@@ -13,7 +12,7 @@ use crate::{
 // ============================================================
 
 fn naivedate_to_serial(d: NaiveDate) -> i64 {
-    (d.num_days_from_ce() - EXCEL_DATE_BASE) as i64
+    serial_from_date(d, DateSystem::Date1900) as i64
 }
 
 fn last_day_of_feb(year: i32) -> u32 {
