@@ -125,7 +125,8 @@ impl<'a> Model<'a> {
 
     // Returns true if it is a reference or evaluates to a reference
     // But DOES NOT evaluate
-    // IronXL: INDEX and IF are references when they give a range, so they are evaluated.
+    // IronXL: INDEX, IF, and a defined name are references when they give a range, so they are
+    // evaluated.
     pub(crate) fn fn_isref(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() != 1 {
             return CalcResult::new_args_number_error(cell);
@@ -134,10 +135,12 @@ impl<'a> Model<'a> {
             Node::ReferenceKind { .. } | Node::RangeKind { .. } | Node::OpRangeKind { .. } => {
                 CalcResult::Boolean(true)
             }
-            node @ Node::FunctionKind {
+            node @ (Node::FunctionKind {
                 kind: Function::Index | Function::If,
                 ..
-            } => CalcResult::Boolean(matches!(
+            }
+            | Node::DefinedNameKind(..)
+            | Node::SheetDefinedNameKind { .. }) => CalcResult::Boolean(matches!(
                 self.evaluate_reference_argument(node, cell),
                 CalcResult::Range { .. }
             )),

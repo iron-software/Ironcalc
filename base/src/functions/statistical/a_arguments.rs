@@ -13,7 +13,7 @@ use crate::constants::{LAST_COLUMN, LAST_ROW};
 use crate::expressions::parser::{ArrayNode, Node};
 use crate::expressions::token::Error;
 use crate::expressions::types::CellReferenceIndex;
-use crate::model::{CellOrRange, Model, ParsedDefinedName};
+use crate::model::Model;
 
 /// How an A function reads the values of an array argument.
 #[derive(Clone, Copy)]
@@ -70,35 +70,7 @@ impl<'a> Model<'a> {
     /// cell, absolute or relative, give a range of one cell, so the range rule reads them.
     fn evaluate_a_argument(&mut self, arg: &Node, cell: CellReferenceIndex) -> CalcResult {
         match arg {
-            Node::ReferenceKind { .. } => {
-                let range = self.evaluate_node_with_reference(arg, cell);
-                if let CalcResult::Range { left, .. } = range {
-                    // A cell read records its support, as `evaluate_node_in_context` does.
-                    self.support
-                        .entry(cell)
-                        .or_default()
-                        .push(CellOrRange::Cell((left.sheet, left.row, left.column)));
-                }
-                range
-            }
-            Node::DefinedNameKind((name, scope, _))
-            | Node::SheetDefinedNameKind {
-                name,
-                sheet_index: scope @ Some(_),
-                formula: Some(_),
-                ..
-            } => match self.get_parsed_defined_name(name, *scope) {
-                Ok(Some(ParsedDefinedName::CellReference(reference))) => CalcResult::Range {
-                    left: reference,
-                    right: reference,
-                },
-                // A name with a relative part, such as `Sheet1!B$1`, is a one-cell reference at
-                // the calling cell.
-                Ok(Some(ParsedDefinedName::Formula(node @ Node::ReferenceKind { .. }))) => {
-                    self.evaluate_a_argument(&node, cell)
-                }
-                _ => self.evaluate_node_in_context(arg, cell),
-            },
+            Node::ReferenceKind { .. } => self.evaluate_cell_reference_node(arg, cell),
             _ => self.evaluate_reference_argument(arg, cell),
         }
     }

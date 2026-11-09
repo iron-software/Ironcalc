@@ -363,10 +363,11 @@ impl<'a> Model<'a> {
     }
 
     /// IronXL: evaluates a node that a function reads as a reference, as in Excel: the range
-    /// operator, `CELL`, `ISFORMULA`, and `FORMULATEXT`. `INDEX` with a reference, and `IF` with
-    /// a scalar condition and a chosen reference, give a range, also a range of one cell. Each
-    /// other node gives the result of `evaluate_node_with_reference`, so `@`, `#`, and `CHOOSE`
-    /// keep the value of `INDEX` and `IF`.
+    /// operator, `CELL`, `ISFORMULA`, and `FORMULATEXT`. `INDEX` with a reference, `IF` with a
+    /// scalar condition and a chosen reference, and a defined name of a reference give a range,
+    /// also a range of one cell. Each other node gives the result of
+    /// `evaluate_node_with_reference`, so `@`, `#`, and `CHOOSE` keep the value of `INDEX` and
+    /// `IF`.
     pub(crate) fn evaluate_reference_node(
         &mut self,
         node: &Node,
@@ -376,15 +377,17 @@ impl<'a> Model<'a> {
             Node::FunctionKind {
                 kind: Function::Index | Function::If,
                 ..
-            } => self.evaluate_reference_argument(node, cell),
+            }
+            | Node::DefinedNameKind(..)
+            | Node::SheetDefinedNameKind { .. } => self.evaluate_reference_argument(node, cell),
             _ => self.evaluate_node_with_reference(node, cell),
         }
     }
 
     /// IronXL: evaluates an argument that a function reads as a reference, as in Excel.
-    /// `INDEX` with a reference, and `IF` with a scalar condition and a chosen reference, give a
-    /// range, also a range of one cell. Each other node gives the result of
-    /// `evaluate_node_in_context`.
+    /// `INDEX` with a reference, `IF` with a scalar condition and a chosen reference, and a
+    /// defined name of a reference give a range, also a range of one cell. Each other node gives
+    /// the result of `evaluate_node_in_context`.
     pub(crate) fn evaluate_reference_argument(
         &mut self,
         node: &Node,
@@ -399,7 +402,59 @@ impl<'a> Model<'a> {
                 kind: Function::If,
                 args,
             } => self.if_reference(args, cell),
+            Node::DefinedNameKind((name, scope, _))
+            | Node::SheetDefinedNameKind {
+                name,
+                sheet_index: scope @ Some(_),
+                formula: Some(_),
+                ..
+            } => match self.get_parsed_defined_name(name, *scope) {
+                Ok(Some(ParsedDefinedName::CellReference(reference))) => {
+                    self.cell_reference_range(reference, cell)
+                }
+                // A name with a relative part, such as `Sheet1!B$1`, is a one-cell reference at
+                // the calling cell.
+                Ok(Some(ParsedDefinedName::Formula(reference @ Node::ReferenceKind { .. }))) => {
+                    self.evaluate_cell_reference_node(&reference, cell)
+                }
+                _ => self.evaluate_node_in_context(node, cell),
+            },
             _ => self.evaluate_node_in_context(node, cell),
+        }
+    }
+
+    /// IronXL: gives the range of one cell of a one-cell reference node at `cell`, as in Excel,
+    /// not the value of the cell. Each other node gives the result of
+    /// `evaluate_node_with_reference`.
+    pub(crate) fn evaluate_cell_reference_node(
+        &mut self,
+        node: &Node,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        match self.evaluate_node_with_reference(node, cell) {
+            CalcResult::Range { left, .. } => self.cell_reference_range(left, cell),
+            result => result,
+        }
+    }
+
+    /// IronXL: gives the range of the one cell `reference`. The cell becomes a precedent of
+    /// `cell`, as a cell that `evaluate_node_in_context` reads.
+    fn cell_reference_range(
+        &mut self,
+        reference: CellReferenceIndex,
+        cell: CellReferenceIndex,
+    ) -> CalcResult {
+        self.support
+            .entry(cell)
+            .or_default()
+            .push(CellOrRange::Cell((
+                reference.sheet,
+                reference.row,
+                reference.column,
+            )));
+        CalcResult::Range {
+            left: reference,
+            right: reference,
         }
     }
 
