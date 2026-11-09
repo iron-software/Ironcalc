@@ -755,19 +755,20 @@ impl<'a> Parser<'a> {
         t
     }
 
+    // IronXL: a chain of range operators reads from left to right, as in Excel, so
+    // `E1:OFFSET(F2,0,0):C1` is `(E1:OFFSET(F2,0,0)):C1`.
     fn parse_range(&mut self) -> Node {
-        let t = self.parse_implicit();
+        let mut t = self.parse_implicit();
         if let Node::ParseErrorKind { .. } = t {
             return t;
         }
-        let next_token = self.lexer.peek_token();
-        if next_token == TokenType::Colon {
+        while self.lexer.peek_token() == TokenType::Colon {
             self.lexer.advance_token();
             let p = self.parse_primary();
             if let Node::ParseErrorKind { .. } = p {
                 return p;
             }
-            return Node::OpRangeKind {
+            t = Node::OpRangeKind {
                 left: Box::new(t),
                 right: Box::new(p),
             };

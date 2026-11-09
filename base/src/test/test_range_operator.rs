@@ -4,7 +4,8 @@
 //! both sides, as in Excel. The order of the corners has no effect, and a side can be a range of
 //! more than one cell. Two sides on different sheets, and a side that is not a reference, give
 //! `#VALUE!`. A side that is an error gives that error. The first side from the left that is not
-//! a reference decides.
+//! a reference decides. A chain of range operators reads from left to right, and a side can be a
+//! function call in any position.
 
 use crate::model::Model;
 use crate::test::util::new_empty_model;
@@ -118,4 +119,59 @@ fn the_range_operator_follows_a_change_of_its_inputs() {
     model._set("E1", "11");
     model.evaluate();
     assert_eq!(model._get_text("H1"), "20");
+}
+
+#[test]
+fn a_range_chain_with_a_function_call_reads_from_left_to_right() {
+    assert_results(&[
+        ("=SUM(E1:OFFSET(F2,0,0):C1)", "25"),
+        ("=SUM(E1:INDEX(E1:F2,2,2):C1)", "25"),
+        ("=SUM(OFFSET(E1,0,0):OFFSET(F2,0,0):C1)", "25"),
+        ("=SUM(E1:OFFSET(F2,0,0):OFFSET(C1,0,0))", "25"),
+        ("=ROWS(E1:OFFSET(F2,0,0):C1)", "2"),
+        ("=COLUMNS(E1:OFFSET(F2,0,0):C1)", "4"),
+        ("=SUM(E1:OFFSET(F2,0,0):C1:C2)", "25"),
+    ]);
+}
+
+#[test]
+fn a_range_chain_keeps_the_forms_that_parsed_before() {
+    assert_results(&[
+        ("=SUM((E1:OFFSET(F2,0,0)):C1)", "25"),
+        ("=SUM(OFFSET(F2,0,0):E1:C1)", "25"),
+        ("=SUM(E1:F2:C1)", "25"),
+        ("=SUM(E1:OFFSET(F2,0,0))", "10"),
+    ]);
+}
+
+#[test]
+fn a_range_chain_applies_the_error_rules_to_each_side() {
+    assert_results(&[
+        ("=SUM(E1:OFFSET(F2,0,0):Sheet2!E1)", "#VALUE!"),
+        ("=SUM(E1:OFFSET(F2,0,0):INDEX({1,2},1))", "#VALUE!"),
+        ("=SUM(E1:OFFSET(F2,0,0):OFFSET(A1,-1,0))", "#REF!"),
+    ]);
+}
+
+#[test]
+fn the_text_of_a_range_chain_parses_again_with_the_same_result() {
+    let mut model = model();
+    model._set("H1", "=SUM((E1:OFFSET(F2,0,0)):C1)");
+    model.evaluate();
+    let text = model._get_formula("H1");
+    assert_eq!(text, "=SUM(E1:OFFSET(F2,0,0):C1)");
+    model._set("H2", &text);
+    model.evaluate();
+    assert_eq!(model._get_text("H2"), "25");
+}
+
+#[test]
+fn a_range_chain_follows_a_change_of_its_inputs() {
+    let mut model = model();
+    model._set("H1", "=SUM(E1:OFFSET(F2,0,0):C1)");
+    model.evaluate();
+    assert_eq!(model._get_text("H1"), "25");
+    model._set("C1", "70");
+    model.evaluate();
+    assert_eq!(model._get_text("H1"), "88");
 }
