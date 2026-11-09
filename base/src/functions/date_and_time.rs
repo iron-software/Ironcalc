@@ -44,15 +44,8 @@ fn excel_serial_to_ymd(serial: i64, date_system: DateSystem) -> Option<(i32, u32
     if serial == 60 {
         return Some((1900, 2, 29));
     }
-    let date = if serial < 60 {
-        // Below the fictional leap day Excel counts serial 1 as 1900-01-01, so
-        // serial N is N days after 1899-12-31 (serial 0).
-        let base = chrono::NaiveDate::from_ymd_opt(1899, 12, 31)?;
-        base + chrono::Duration::days(serial)
-    } else {
-        // From 1900-03-01 (serial 61) onwards IronCalc's serials match Excel.
-        from_excel_date(serial, date_system).ok()?
-    };
+    // IronXL: from_excel_date gives the dates of Excel before 1 March 1900 (IronXL ADR 029).
+    let date = from_excel_date(serial, date_system).ok()?;
     Some((date.year(), date.month(), date.day()))
 }
 
@@ -93,10 +86,9 @@ fn days360_eu(start: (i32, u32, u32), end: (i32, u32, u32)) -> f64 {
     (360 * (y2 - y1) + 30 * (m2 as i32 - m1 as i32) + (day2 - day1)) as f64
 }
 
-/// Maps a date to the WEEKDAY number for the given `return_type`.
+/// Maps a weekday to the WEEKDAY number for the given `return_type`.
 /// Returns `Error::VALUE`/`Error::NUM` for an invalid `return_type`.
-fn weekday_number(date: chrono::NaiveDate, return_type: i32) -> Result<f64, Error> {
-    let weekday = date.weekday();
+fn weekday_number(weekday: chrono::Weekday, return_type: i32) -> Result<f64, Error> {
     let num = match return_type {
         1 => weekday.num_days_from_sunday() + 1,
         2 => weekday.number_from_monday(),
@@ -187,8 +179,10 @@ macro_rules! time_part_fn {
 use crate::arithmetic::bcast_idx;
 use crate::expressions::types::CellReferenceIndex;
 use crate::formatter::dates::date_to_serial_number;
+use crate::formatter::dates::iso_week_of_serial;
 use crate::formatter::dates::permissive_date_to_serial_number;
 use crate::formatter::dates::serial_from_date;
+use crate::formatter::dates::weekday_of_serial;
 use crate::formatter::dates::DateSystem;
 use crate::formatter::dates::DATE_OUT_OF_RANGE_MESSAGE;
 use crate::formatter::format::parse_time;
@@ -986,11 +980,11 @@ impl<'a> Model<'a> {
         };
         let mut count = 0i64;
         for serial in from..=to {
-            let date = match self.excel_date(serial, cell) {
-                Ok(d) => d,
-                Err(e) => return e,
-            };
-            let weekday = date.weekday().number_from_monday();
+            if let Err(e) = self.excel_date(serial, cell) {
+                return e;
+            }
+            // IronXL: the weekday of Excel (IronXL ADR 043).
+            let weekday = weekday_of_serial(serial, self.date_system).number_from_monday();
             let is_weekend = matches!(weekday, 6 | 7);
             if !is_weekend && !holidays.contains(&serial) {
                 count += 1;
@@ -1150,11 +1144,12 @@ impl<'a> Model<'a> {
         };
         let mut count = 0i64;
         for serial in from..=to {
-            let date = match self.excel_date(serial, cell) {
-                Ok(d) => d,
-                Err(e) => return e,
-            };
-            let weekday = date.weekday().number_from_monday() as usize - 1;
+            if let Err(e) = self.excel_date(serial, cell) {
+                return e;
+            }
+            // IronXL: the weekday of Excel (IronXL ADR 043).
+            let weekday =
+                weekday_of_serial(serial, self.date_system).num_days_from_monday() as usize;
             if !weekend_pattern[weekday] && !holidays.contains(&serial) {
                 count += 1;
             }
@@ -1553,9 +1548,10 @@ impl<'a> Model<'a> {
         // Broadcasts element-wise over a range/array date argument.
         let date_system = self.date_system;
         self.apply_number_unary(&args[0], cell, move |serial| {
-            let date =
-                from_excel_date(serial.floor() as i64, date_system).map_err(|_| Error::NUM)?;
-            weekday_number(date, return_type)
+            let serial = serial.floor() as i64;
+            from_excel_date(serial, date_system).map_err(|_| Error::NUM)?;
+            // IronXL: the weekday of Excel (IronXL ADR 043).
+            weekday_number(weekday_of_serial(serial, date_system), return_type)
         })
     }
 
@@ -1580,8 +1576,13 @@ impl<'a> Model<'a> {
             1
         };
         if return_type == 21 {
-            let w = date.iso_week().week();
-            return CalcResult::Number(w as f64);
+            // IronXL: the ISO week with the weekday of Excel (IronXL ADR 043).
+            return match iso_week_of_serial(serial, self.date_system) {
+                Some(week) => CalcResult::Number(week as f64),
+                None => {
+                    CalcResult::new_error(Error::NUM, cell, DATE_OUT_OF_RANGE_MESSAGE.to_string())
+                }
+            };
         }
         let start_offset = match return_type {
             1 => chrono::Weekday::Sun,
@@ -1597,8 +1598,8 @@ impl<'a> Model<'a> {
             }
             _ => return CalcResult::new_error(Error::NUM, cell, "Invalid return_type".to_string()),
         };
-        let mut first = match chrono::NaiveDate::from_ymd_opt(date.year(), 1, 1) {
-            Some(d) => d,
+        let first = match chrono::NaiveDate::from_ymd_opt(date.year(), 1, 1) {
+            Some(d) => serial_from_date(d, self.date_system) as i64,
             None => {
                 return CalcResult::new_error(
                     Error::NUM,
@@ -1607,10 +1608,12 @@ impl<'a> Model<'a> {
                 );
             }
         };
-        while first.weekday() != start_offset {
-            first -= chrono::Duration::days(1);
-        }
-        let week = (date - first).num_days() / 7 + 1;
+        // IronXL: count the days in serials with the weekday of Excel (IronXL ADR 043). The first
+        // week starts on the `start_offset` day on or before 1 January.
+        let first_weekday = weekday_of_serial(first, self.date_system);
+        let offset =
+            (first_weekday.num_days_from_monday() + 7 - start_offset.num_days_from_monday()) % 7;
+        let week = (serial - first + offset as i64) / 7 + 1;
         CalcResult::Number(week as f64)
     }
 
@@ -1621,9 +1624,12 @@ impl<'a> Model<'a> {
         // Broadcasts element-wise over a range/array date argument.
         let date_system = self.date_system;
         self.apply_number_unary(&args[0], cell, move |serial| {
-            let date =
-                from_excel_date(serial.floor() as i64, date_system).map_err(|_| Error::NUM)?;
-            Ok(date.iso_week().week() as f64)
+            let serial = serial.floor() as i64;
+            from_excel_date(serial, date_system).map_err(|_| Error::NUM)?;
+            // IronXL: the ISO week with the weekday of Excel (IronXL ADR 043).
+            iso_week_of_serial(serial, date_system)
+                .map(f64::from)
+                .ok_or(Error::NUM)
         })
     }
 
@@ -1639,6 +1645,28 @@ impl<'a> Model<'a> {
         }
     }
 
+    /// IronXL: the serial `days` workdays after `start`, or before it for a negative count. A
+    /// workday is not a weekend day of `weekend_mask`, with the weekday of Excel, and not in
+    /// `holidays` (IronXL ADR 043).
+    fn add_workdays(
+        &self,
+        start: i64,
+        mut days: i32,
+        weekend_mask: &[bool; 7],
+        holidays: &std::collections::HashSet<i64>,
+    ) -> i32 {
+        let step = if days > 0 { 1 } else { -1 };
+        let mut serial = start;
+        while days != 0 {
+            serial += step;
+            let weekday = weekday_of_serial(serial, self.date_system);
+            if !Self::is_weekend(weekday, weekend_mask) && !holidays.contains(&serial) {
+                days -= step as i32;
+            }
+        }
+        serial as i32
+    }
+
     pub(crate) fn fn_workday(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if !(2..=3).contains(&args.len()) {
             return CalcResult::new_args_number_error(cell);
@@ -1647,11 +1675,10 @@ impl<'a> Model<'a> {
             Ok(c) => c.floor() as i64,
             Err(s) => return s,
         };
-        let mut date = match self.excel_date(start_serial, cell) {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        let mut days = match self.get_number(&args[1], cell) {
+        if let Err(e) = self.excel_date(start_serial, cell) {
+            return e;
+        }
+        let days = match self.get_number(&args[1], cell) {
             Ok(f) => f as i32,
             Err(s) => return s,
         };
@@ -1660,20 +1687,7 @@ impl<'a> Model<'a> {
             Ok(h) => h,
             Err(e) => return e,
         };
-        while days != 0 {
-            if days > 0 {
-                date += chrono::Duration::days(1);
-                if !Self::is_weekend(date.weekday(), &weekend) && !holiday_set.contains(&date) {
-                    days -= 1;
-                }
-            } else {
-                date -= chrono::Duration::days(1);
-                if !Self::is_weekend(date.weekday(), &weekend) && !holiday_set.contains(&date) {
-                    days += 1;
-                }
-            }
-        }
-        let serial = serial_from_date(date, self.date_system);
+        let serial = self.add_workdays(start_serial, days, &weekend, &holiday_set);
         self.date_serial_result(serial, cell)
     }
 
@@ -1681,15 +1695,15 @@ impl<'a> Model<'a> {
         &mut self,
         arg_option: Option<&Node>,
         cell: CellReferenceIndex,
-    ) -> Result<std::collections::HashSet<chrono::NaiveDate>, CalcResult> {
+    ) -> Result<std::collections::HashSet<i64>, CalcResult> {
         let mut holiday_set = std::collections::HashSet::new();
 
         if let Some(arg) = arg_option {
             let date_system = self.date_system;
             self.collect_serial_numbers(arg, cell, |serial| {
                 match from_excel_date(serial, date_system) {
-                    Ok(date) => {
-                        holiday_set.insert(date);
+                    Ok(_) => {
+                        holiday_set.insert(serial);
                         Ok(())
                     }
                     Err(_) => Err(CalcResult::Error {
@@ -1716,11 +1730,10 @@ impl<'a> Model<'a> {
             Ok(c) => c.floor() as i64,
             Err(s) => return s,
         };
-        let mut date = match self.excel_date(start_serial, cell) {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        let mut days = match self.get_number(&args[1], cell) {
+        if let Err(e) = self.excel_date(start_serial, cell) {
+            return e;
+        }
+        let days = match self.get_number(&args[1], cell) {
             Ok(f) => f as i32,
             Err(s) => return s,
         };
@@ -1742,22 +1755,7 @@ impl<'a> Model<'a> {
             };
         }
 
-        while days != 0 {
-            if days > 0 {
-                date += chrono::Duration::days(1);
-                if !Self::is_weekend(date.weekday(), &weekend_mask) && !holiday_set.contains(&date)
-                {
-                    days -= 1;
-                }
-            } else {
-                date -= chrono::Duration::days(1);
-                if !Self::is_weekend(date.weekday(), &weekend_mask) && !holiday_set.contains(&date)
-                {
-                    days += 1;
-                }
-            }
-        }
-        let serial = serial_from_date(date, self.date_system);
+        let serial = self.add_workdays(start_serial, days, &weekend_mask, &holiday_set);
         self.date_serial_result(serial, cell)
     }
 
@@ -1789,7 +1787,8 @@ impl<'a> Model<'a> {
             Ok(d) => d,
             Err(e) => return e,
         };
-        let days = (end_date - start_date).num_days() as f64;
+        // IronXL: the day count of Excel counts the fictional 29 February 1900 (IronXL ADR 029).
+        let days = (end_serial - start_serial) as f64;
         let result = match basis {
             0 => {
                 // YEARFRAC basis 0 uses the financial US 30/360 convention

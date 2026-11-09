@@ -15,6 +15,7 @@ mod test_criteria_white_space;
 mod test_database;
 mod test_date_1904;
 mod test_date_and_time;
+mod test_date_before_march_1900;
 mod test_datedif_leap_month_end;
 mod test_days360_month_end;
 mod test_degrees_radians;

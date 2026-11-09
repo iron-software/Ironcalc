@@ -258,9 +258,10 @@ fn date_function_bounds_1900() {
     model._set("C1", "=DATE(9999,12,31)");
     model.evaluate();
 
-    // The 1900 date system keeps the upstream lower bound behaviour: serial 1 is 1899-12-31
-    // in the engine, and EOMONTH and WORKDAY can give a serial number below 1.
-    assert_eq!(number(&model, "A1"), -30.0);
+    // The 1900 date system keeps the upstream lower bound behaviour: EOMONTH and WORKDAY can give
+    // a serial number below 1. IronXL: serial 1 is 1900-01-01 and serial 0 is 1899-12-31
+    // (IronXL ADR 029), so EOMONTH(1,-1) gives 0.
+    assert_eq!(number(&model, "A1"), 0.0);
     assert_eq!(number(&model, "A2"), -1.0);
     assert_eq!(number(&model, "A3"), -1.0);
     assert_eq!(model._get_text("A4"), "#NUM!");
