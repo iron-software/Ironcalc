@@ -405,7 +405,8 @@ impl<'a> Model<'a> {
 
     /// IronXL: the range operator gives the smallest range that holds both sides, as in Excel.
     /// The order of the corners has no effect, and a side can hold more than one cell. Two sides
-    /// on different sheets, and a side that is not a reference, give `#VALUE!`.
+    /// on different sheets, and a side that is not a reference, give `#VALUE!`. A side that is an
+    /// error gives that error. The first side from the left that is not a reference decides.
     fn get_range(&mut self, left: &Node, right: &Node, cell: CellReferenceIndex) -> CalcResult {
         let left_result = self.evaluate_reference_node(left, cell);
         let right_result = self.evaluate_reference_node(right, cell);
@@ -439,6 +440,8 @@ impl<'a> Model<'a> {
                         .max(right2.column),
                 },
             },
+            (error @ CalcResult::Error { .. }, _) => error,
+            (CalcResult::Range { .. }, error @ CalcResult::Error { .. }) => error,
             _ => CalcResult::Error {
                 error: Error::VALUE,
                 origin: cell,
