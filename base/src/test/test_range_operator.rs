@@ -3,7 +3,8 @@
 //! IronXL: the range operator `:` between two references gives the smallest range that holds
 //! both sides, as in Excel. The order of the corners has no effect, and a side can be a range of
 //! more than one cell. Two sides on different sheets, and a side that is not a reference, give
-//! `#VALUE!`.
+//! `#VALUE!`. A side that is an error gives that error. The first side from the left that is not
+//! a reference decides.
 
 use crate::model::Model;
 use crate::test::util::new_empty_model;
@@ -81,6 +82,30 @@ fn the_range_operator_keeps_the_results_that_match_excel() {
         ("=SUM(E1:INDIRECT(\"Sheet2!E1\"))", "#VALUE!"),
         ("=SUM(INDEX({1,2},1):E1)", "#VALUE!"),
         ("=SUM(E1:INDEX({1,2},1))", "#VALUE!"),
+    ]);
+}
+
+#[test]
+fn the_range_operator_gives_the_error_of_a_side() {
+    assert_results(&[
+        ("=SUM(OFFSET(A1,-1,0):E1)", "#REF!"),
+        ("=SUM(E1:OFFSET(A1,-1,0))", "#REF!"),
+        ("=SUM(INDIRECT(\"ZZZ\"):E1)", "#REF!"),
+        ("=SUM((1/0):E1)", "#DIV/0!"),
+        ("=SUM(E1:(1/0))", "#DIV/0!"),
+        ("=SUM(NA():E1)", "#N/A"),
+        ("=SUM((1/0):OFFSET(A1,-1,0))", "#DIV/0!"),
+        ("=SUM(OFFSET(A1,-1,0):(1/0))", "#REF!"),
+    ]);
+}
+
+#[test]
+fn the_range_operator_gives_the_result_of_the_first_side_that_is_not_a_reference() {
+    assert_results(&[
+        ("=SUM(INDEX({1,2},1):OFFSET(A1,-1,0))", "#VALUE!"),
+        ("=SUM(OFFSET(A1,-1,0):INDEX({1,2},1))", "#REF!"),
+        ("=SUM(INDIRECT(\"Sheet2!E1\"):OFFSET(A1,-1,0))", "#REF!"),
+        ("=SUM(OFFSET(A1,-1,0):INDIRECT(\"Sheet2!E1\"))", "#REF!"),
     ]);
 }
 
