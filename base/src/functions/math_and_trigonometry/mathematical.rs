@@ -612,9 +612,19 @@ impl<'a> Model<'a> {
 
     /// SUMIFS(sum_range, criteria_range1, criteria1, [criteria_range2, criteria2], ...)
     pub(crate) fn fn_sumifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.sum_ifs(args, cell, true)
+    }
+
+    /// SUMIFS, and the scalar path of SUMIF without the size check of `check_size`.
+    pub(crate) fn sum_ifs(
+        &mut self,
+        args: &[Node],
+        cell: CellReferenceIndex,
+        check_size: bool,
+    ) -> CalcResult {
         let mut total = 0.0;
         let sum = |value| total += value;
-        if let Err(e) = self.apply_ifs(args, cell, sum) {
+        if let Err(e) = self.apply_ifs(args, cell, check_size, sum) {
             return e;
         }
         CalcResult::Number(total)

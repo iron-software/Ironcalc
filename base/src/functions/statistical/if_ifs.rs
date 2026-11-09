@@ -27,6 +27,22 @@ fn array_node_to_calc_result(node: &ArrayNode, cell: CellReferenceIndex) -> Calc
     }
 }
 
+/// IronXL: gives true when both ranges have the same number of rows and columns. The IFS
+/// functions compare the declared bounds, before the cut to the used range, as Excel does.
+fn same_size(first: &Range, second: &Range) -> bool {
+    first.right.row - first.left.row == second.right.row - second.left.row
+        && first.right.column - first.left.column == second.right.column - second.left.column
+}
+
+/// IronXL: the `#VALUE!` error of a criteria range with another size than the first range.
+fn size_error(cell: CellReferenceIndex) -> CalcResult {
+    CalcResult::new_error(
+        Error::VALUE,
+        cell,
+        "Ranges are of different sizes".to_string(),
+    )
+}
+
 impl<'a> Model<'a> {
     pub(crate) fn fn_countif(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() == 2 {
@@ -42,10 +58,11 @@ impl<'a> Model<'a> {
     pub(crate) fn fn_averageif(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() == 2 {
             let arguments = vec![args[0].clone(), args[0].clone(), args[1].clone()];
-            self.fn_averageifs(&arguments, cell)
+            self.average_ifs(&arguments, cell, false)
         } else if args.len() == 3 {
+            // IronXL: AVERAGEIF gives no size error for an average range of another size.
             let arguments = vec![args[2].clone(), args[0].clone(), args[1].clone()];
-            self.fn_averageifs(&arguments, cell)
+            self.average_ifs(&arguments, cell, false)
         } else {
             CalcResult::new_args_number_error(cell)
         }
@@ -82,11 +99,14 @@ impl<'a> Model<'a> {
                         "Ranges are in different sheets".to_string(),
                     );
                 }
-                // TODO test ranges are of the same size as sum_range
                 ranges.push(Range { left, right });
             } else {
                 return CalcResult::new_error(Error::VALUE, cell, "Expected a range".to_string());
             }
+        }
+        // IronXL: each criteria range must have the rows and columns of the first range.
+        if ranges.iter().any(|range| !same_size(range, &ranges[0])) {
+            return size_error(cell);
         }
         for criterion in criteria.iter() {
             fn_criteria.push(build_criteria_with_date_system(
@@ -182,10 +202,14 @@ impl<'a> Model<'a> {
         CalcResult::Number(total)
     }
 
+    /// Applies `apply` to each matching value of SUMIFS, AVERAGEIFS, MINIFS, or MAXIFS.
+    /// IronXL: with `check_size`, a criteria range with another size than the sum range gives
+    /// `#VALUE!`. SUMIF and AVERAGEIF call it without the check, as Excel gives no size error.
     pub(crate) fn apply_ifs<F>(
         &mut self,
         args: &[Node],
         cell: CellReferenceIndex,
+        check_size: bool,
         apply: F,
     ) -> Result<(), CalcResult>
     where
@@ -241,7 +265,6 @@ impl<'a> Model<'a> {
                         "Ranges are in different sheets".to_string(),
                     ));
                 }
-                // TODO test ranges are of the same size as sum_range
                 ranges.push(Range { left, right });
             } else {
                 return Err(CalcResult::new_error(
@@ -250,6 +273,9 @@ impl<'a> Model<'a> {
                     "Expected a range".to_string(),
                 ));
             }
+        }
+        if check_size && ranges.iter().any(|range| !same_size(range, &sum_range)) {
+            return Err(size_error(cell));
         }
         for criterion in criteria.iter() {
             fn_criteria.push(build_criteria_with_date_system(
@@ -416,7 +442,7 @@ impl<'a> Model<'a> {
             _ => {
                 // Single criterion: delegate to SUMIFS, which returns a scalar.
                 let arguments = vec![sum_range.clone(), criteria_range.clone(), criteria.clone()];
-                return self.fn_sumifs(&arguments, cell);
+                return self.sum_ifs(&arguments, cell, false);
             }
         };
 
@@ -460,6 +486,16 @@ impl<'a> Model<'a> {
     }
 
     pub(crate) fn fn_averageifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.average_ifs(args, cell, true)
+    }
+
+    /// AVERAGEIFS, and AVERAGEIF without the size check of `check_size`.
+    fn average_ifs(
+        &mut self,
+        args: &[Node],
+        cell: CellReferenceIndex,
+        check_size: bool,
+    ) -> CalcResult {
         let mut total = 0.0;
         let mut count = 0.0;
 
@@ -467,7 +503,7 @@ impl<'a> Model<'a> {
             total += value;
             count += 1.0;
         };
-        if let Err(e) = self.apply_ifs(args, cell, average) {
+        if let Err(e) = self.apply_ifs(args, cell, check_size, average) {
             return e;
         }
 
@@ -484,7 +520,7 @@ impl<'a> Model<'a> {
     pub(crate) fn fn_minifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         let mut min = f64::INFINITY;
         let apply_min = |value: f64| min = value.min(min);
-        if let Err(e) = self.apply_ifs(args, cell, apply_min) {
+        if let Err(e) = self.apply_ifs(args, cell, true, apply_min) {
             return e;
         }
 
@@ -497,7 +533,7 @@ impl<'a> Model<'a> {
     pub(crate) fn fn_maxifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         let mut max = -f64::INFINITY;
         let apply_max = |value: f64| max = value.max(max);
-        if let Err(e) = self.apply_ifs(args, cell, apply_max) {
+        if let Err(e) = self.apply_ifs(args, cell, true, apply_max) {
             return e;
         }
         if max.is_infinite() {
