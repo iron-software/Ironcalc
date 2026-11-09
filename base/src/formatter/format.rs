@@ -92,6 +92,73 @@ fn use_group_separator(use_thousands: bool, digit_index: i32, group_sizes: &str)
     false
 }
 
+/// IronXL: the en-US code of the long date of the system, for the tag `[$-F800]`.
+const SYSTEM_LONG_DATE: &str = "dddd, mmmm d, yyyy";
+/// IronXL: the en-US code of the long time of the system, for the tag `[$-F400]`.
+const SYSTEM_LONG_TIME: &str = "h:mm:ss AM/PM";
+
+/// IronXL: `code` without each locale tag without a currency symbol, such as `[$-409]`, and the
+/// text of each tag after `[$-`. A tag in quoted text or after `\` stays. A tag before a `.`
+/// becomes the empty text `""`, so `ss[$-409].0` becomes `ss"".0`, which the parser refuses, as
+/// Excel does.
+fn split_locale_tags(code: &str) -> (String, Vec<&str>) {
+    let mut kept = String::with_capacity(code.len());
+    let mut tags = Vec::new();
+    let mut rest = code;
+    let mut quoted = false;
+    while let Some(c) = rest.chars().next() {
+        if !quoted && rest.starts_with("[$-") {
+            if let Some(end) = rest.find(']') {
+                tags.push(&rest[3..end]);
+                rest = &rest[end + 1..];
+                if rest.starts_with('.') {
+                    kept.push_str(r#""""#);
+                }
+                continue;
+            }
+        }
+        let width = match c {
+            // An escaped character is one unit with its `\`.
+            '\\' if !quoted => 1 + rest[1..].chars().next().map_or(0, char::len_utf8),
+            _ => c.len_utf8(),
+        };
+        kept.push_str(&rest[..width]);
+        quoted ^= c == '"';
+        rest = &rest[width..];
+    }
+    (kept, tags)
+}
+
+/// IronXL: a copy of the number format `code` for the parser: each locale tag without a currency
+/// symbol goes, as `split_locale_tags` tells. The parser reads a currency symbol after `[$` and
+/// refuses a tag without one, but Excel accepts it. The engine does not use the locale of a tag.
+pub fn without_locale_tags(code: &str) -> String {
+    split_locale_tags(code).0
+}
+
+/// IronXL: the en-US code of a system tag, the text after `[$-` in any letter case: the long date
+/// for `F800` and `x-sysdate`, the long time for `F400` and `x-systime`. None for another tag.
+pub fn system_code(tag: &str) -> Option<&'static str> {
+    if tag.eq_ignore_ascii_case("f800") || tag.eq_ignore_ascii_case("x-sysdate") {
+        Some(SYSTEM_LONG_DATE)
+    } else if tag.eq_ignore_ascii_case("f400") || tag.eq_ignore_ascii_case("x-systime") {
+        Some(SYSTEM_LONG_TIME)
+    } else {
+        None
+    }
+}
+
+/// IronXL: the code that `TEXT` formats with. A system tag in any section replaces the whole code
+/// with its en-US code, as Excel shows it in the en-US locale. Else the locale tags go, as
+/// `without_locale_tags` tells.
+pub fn text_function_code(code: &str) -> String {
+    let (kept, tags) = split_locale_tags(code);
+    match tags.into_iter().find_map(system_code) {
+        Some(system) => system.to_string(),
+        None => kept,
+    }
+}
+
 pub fn format_number(value_original: f64, format: &str, locale: &Locale) -> Formatted {
     format_number_with_date_system(value_original, format, locale, DateSystem::Date1900)
 }
