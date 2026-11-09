@@ -5,10 +5,7 @@ use crate::expressions::parser::ArrayNode;
 use crate::expressions::types::CellReferenceIndex;
 use crate::implicit_intersection::implicit_intersection;
 use crate::{
-    calc_result::CalcResult,
-    expressions::parser::Node,
-    expressions::token::Error,
-    model::{CellOrRange, Model},
+    calc_result::CalcResult, expressions::parser::Node, expressions::token::Error, model::Model,
     utils::ParsedReference,
 };
 
@@ -206,23 +203,15 @@ impl<'a> Model<'a> {
     /// functions, such as COUNTIF, SUMIF, and SUMIFS.
     /// A one-cell reference is a range of one cell, as in Excel, not the value of the cell.
     /// The cell becomes a precedent of `cell`, so a change of the cell updates the result.
-    /// IronXL: `INDEX` and `IF` give their reference through `evaluate_reference_argument`.
+    /// IronXL: `INDEX`, `IF`, and a defined name give their reference through
+    /// `evaluate_reference_argument`.
     pub(crate) fn evaluate_lookup_vector_node(
         &mut self,
         node: &Node,
         cell: CellReferenceIndex,
     ) -> CalcResult {
         match node {
-            Node::ReferenceKind { .. } => {
-                let range = self.evaluate_node_with_reference(node, cell);
-                if let CalcResult::Range { left, .. } = &range {
-                    self.support
-                        .entry(cell)
-                        .or_default()
-                        .push(CellOrRange::Cell((left.sheet, left.row, left.column)));
-                }
-                range
-            }
+            Node::ReferenceKind { .. } => self.evaluate_cell_reference_node(node, cell),
             _ => self.evaluate_reference_argument(node, cell),
         }
     }
