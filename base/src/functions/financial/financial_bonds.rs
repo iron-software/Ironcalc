@@ -3,7 +3,7 @@ use chrono::{Datelike, Months, NaiveDate};
 use crate::{
     calc_result::CalcResult,
     expressions::{parser::Node, token::Error, types::CellReferenceIndex},
-    formatter::dates::{from_excel_date, serial_from_date, DateSystem},
+    formatter::dates::{days_between, from_excel_date, serial_from_date, DateSystem},
     model::Model,
 };
 
@@ -67,8 +67,9 @@ fn days_30_360_eu(d1: NaiveDate, d2: NaiveDate) -> f64 {
     (360 * (y2 - y1) + 30 * (m2 - m1) + (day2 - day1)) as f64
 }
 
+// IronXL: count the fictional 29 February 1900 as Excel does (IronXL ADR 029).
 fn actual_days(d1: NaiveDate, d2: NaiveDate) -> f64 {
-    (d2 - d1).num_days() as f64
+    days_between(d1, d2, DateSystem::Date1900) as f64
 }
 
 // Basis-aware days from d1 to d2.

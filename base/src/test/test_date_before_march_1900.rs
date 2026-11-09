@@ -99,6 +99,43 @@ fn date_parts_of_a_serial() {
 }
 
 #[test]
+fn day_counts_hold_the_fictional_29_february() {
+    // Excel counts the fictional 29 February 1900 in a day count from a date before
+    // 1 March 1900 (IronXL ADR 029).
+    assert_values(
+        &[
+            ("A1", "=DATEDIF(1,61,\"yd\")", n(60.0)),
+            ("A2", "=DATEDIF(2,61,\"yd\")", n(59.0)),
+            ("A3", "=DATEDIF(1,60,\"yd\")", n(59.0)),
+            ("A4", "=DATEDIF(1,59,\"yd\")", n(58.0)),
+            (
+                "A5",
+                "=DATEDIF(DATE(2020,1,15),DATE(2026,3,1),\"yd\")",
+                n(45.0),
+            ),
+            ("A6", "=DATEDIF(15,74,\"md\")", n(28.0)),
+            ("A7", "=DATEDIF(15,58,\"md\")", n(12.0)),
+            (
+                "A8",
+                "=DATEDIF(DATE(2026,1,15),DATE(2026,3,14),\"md\")",
+                n(27.0),
+            ),
+            ("A9", "=ACCRINTM(1,61,0.36,1000,2)", n(60.0)),
+            ("A10", "=ROUND(ACCRINTM(1,59,0.36,1000,2),9)", n(58.0)),
+            ("A11", "=COUPDAYS(50,DATE(1900,8,15),2,1)", n(182.0)),
+            (
+                "A12",
+                "=COUPDAYS(DATE(2026,2,19),DATE(2026,8,15),2,1)",
+                n(181.0),
+            ),
+            ("A13", "=COUPDAYBS(50,DATE(1900,8,15),2,1)", n(4.0)),
+            ("A14", "=COUPDAYSNC(50,DATE(1900,8,15),2,1)", n(178.0)),
+        ],
+        false,
+    );
+}
+
+#[test]
 fn weekday_of_excel() {
     assert_values(
         &[

@@ -3,7 +3,7 @@ use chrono::{Datelike, NaiveDate};
 use crate::{
     calc_result::CalcResult,
     expressions::{parser::Node, token::Error, types::CellReferenceIndex},
-    formatter::dates::from_excel_date,
+    formatter::dates::{days_between, from_excel_date, DateSystem},
     model::Model,
 };
 
@@ -67,8 +67,9 @@ fn acc_change_month(d: NaiveDate, n: i32, return_last_day: bool) -> Result<Naive
     }
 }
 
+// IronXL: count the fictional 29 February 1900 as Excel does (IronXL ADR 029).
 fn acc_days(after: NaiveDate, before: NaiveDate) -> f64 {
-    (after - before).num_days() as f64
+    days_between(before, after, DateSystem::Date1900) as f64
 }
 
 fn acc_date_diff_360(sd: i32, sm: i32, sy: i32, ed: i32, em: i32, ey: i32) -> f64 {
