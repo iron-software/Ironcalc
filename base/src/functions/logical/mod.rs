@@ -117,20 +117,9 @@ impl<'a> Model<'a> {
     /// reference argument uses this result, so it reads `IF(TRUE,B1)` as it reads `B1`. An array
     /// condition gives the array of `fn_if`.
     pub(crate) fn if_reference(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
-        self.evaluate_if(args, cell, Self::evaluate_if_reference_branch)
-    }
-
-    /// Evaluates the chosen argument of `if_reference`. A direct reference gives a range of one
-    /// cell. `INDEX` and `IF` give their reference. Each other node gives its value.
-    fn evaluate_if_reference_branch(
-        &mut self,
-        node: &Node,
-        cell: CellReferenceIndex,
-    ) -> CalcResult {
-        match node {
-            Node::ReferenceKind { .. } => self.evaluate_lookup_vector_node(node, cell),
-            _ => self.evaluate_reference_argument(node, cell),
-        }
+        // A direct reference in the chosen argument gives a range of one cell. `INDEX` and `IF`
+        // give their reference. Each other node gives its value.
+        self.evaluate_if(args, cell, Self::evaluate_lookup_vector_node)
     }
 
     /// Evaluates IF. `branch` evaluates the chosen argument of a scalar condition.

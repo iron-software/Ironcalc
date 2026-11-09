@@ -202,9 +202,11 @@ fn index_from_array(
 
 impl<'a> Model<'a> {
     /// Evaluates the range argument of a lookup function: XLOOKUP, MATCH, XMATCH,
-    /// INDEX, LOOKUP, VLOOKUP, and HLOOKUP.
+    /// INDEX, LOOKUP, VLOOKUP, and HLOOKUP. IronXL: also the range arguments of the criteria
+    /// functions, such as COUNTIF, SUMIF, and SUMIFS.
     /// A one-cell reference is a range of one cell, as in Excel, not the value of the cell.
     /// The cell becomes a precedent of `cell`, so a change of the cell updates the result.
+    /// IronXL: `INDEX` and `IF` give their reference through `evaluate_reference_argument`.
     pub(crate) fn evaluate_lookup_vector_node(
         &mut self,
         node: &Node,
@@ -221,7 +223,7 @@ impl<'a> Model<'a> {
                 }
                 range
             }
-            _ => self.evaluate_node_in_context(node, cell),
+            _ => self.evaluate_reference_argument(node, cell),
         }
     }
 
