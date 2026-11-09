@@ -8,7 +8,9 @@ use crate::{
         token::Error,
         types::CellReferenceIndex,
     },
-    formatter::format::{format_number_with_date_system, parse_formatted_number_with_date_system},
+    formatter::format::{
+        format_number_with_date_system, parse_formatted_number_with_date_system, text_function_code,
+    },
     functions::{
         text::util::{substitute, text_after, text_before, Case},
         util::from_wildcard_to_regex,
@@ -284,7 +286,8 @@ impl<'a> Model<'a> {
         match value_result {
             CalcResult::Array(arr) => {
                 let format_code = match self.get_string(&args[1], cell) {
-                    Ok(s) => s,
+                    // IronXL: a locale tag without a currency symbol goes, as in Excel.
+                    Ok(s) => text_function_code(&s),
                     Err(e) => return e,
                 };
                 let locale = self.locale;
@@ -340,7 +343,8 @@ impl<'a> Model<'a> {
                     CalcResult::Array(_) | CalcResult::Lambda(_) => unreachable!(),
                 };
                 let format_code = match self.get_string(&args[1], cell) {
-                    Ok(s) => s,
+                    // IronXL: a locale tag without a currency symbol goes, as in Excel.
+                    Ok(s) => text_function_code(&s),
                     Err(s) => return s,
                 };
                 let d = format_number_with_date_system(
