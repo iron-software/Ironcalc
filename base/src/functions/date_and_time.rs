@@ -1436,7 +1436,9 @@ impl<'a> Model<'a> {
                     };
                 }
 
-                (end - start_adj).num_days() as f64
+                // IronXL: count in serials, so the count holds the fictional 29 February 1900
+                // as Excel counts it (IronXL ADR 029).
+                (end_serial - serial_from_date(start_adj, self.date_system) as i64) as f64
             }
             "MD" => {
                 let mut months =
@@ -1449,7 +1451,8 @@ impl<'a> Model<'a> {
                 } else {
                     start - Months::new((-months) as u32)
                 };
-                (end - start_shifted).num_days() as f64
+                // IronXL: count in serials, as for "YD" (IronXL ADR 029).
+                (end_serial - serial_from_date(start_shifted, self.date_system) as i64) as f64
             }
             _ => {
                 return CalcResult::Error {

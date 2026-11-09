@@ -85,6 +85,13 @@ pub fn serial_from_date(date: NaiveDate, date_system: DateSystem) -> i32 {
     }
 }
 
+/// IronXL: the number of days from `start` to `end`, as Excel counts them. In the 1900 date
+/// system, Excel counts the fictional 29 February 1900. So the count from a date before
+/// 1 March 1900 to a later date is one more than the calendar count (IronXL ADR 029).
+pub fn days_between(start: NaiveDate, end: NaiveDate, date_system: DateSystem) -> i64 {
+    serial_from_date(end, date_system) as i64 - serial_from_date(start, date_system) as i64
+}
+
 /// IronXL: the date of a serial number, with no range check. In the 1900 date system, a serial
 /// below 60 counts the days from 31 December 1899, and serial 60, the fictional 29 February 1900,
 /// is 28 February 1900. So serial 0 is 31 December 1899 and serial 1 is 1 January 1900
@@ -313,6 +320,27 @@ mod tests {
         assert_eq!(iso_week_of_serial(i64::MAX - 7, date_1900), None);
         assert_eq!(weekday_of_serial(0, DateSystem::Date1904), Weekday::Fri);
         assert_eq!(iso_week_of_serial(0, DateSystem::Date1904), Some(53));
+        assert_eq!(
+            days_between(date(1900, 1, 1), date(1900, 3, 1), date_1900),
+            60
+        );
+        assert_eq!(
+            days_between(date(1900, 1, 1), date(1900, 2, 28), date_1900),
+            58
+        );
+        assert_eq!(
+            days_between(date(1900, 3, 1), date(1900, 1, 1), date_1900),
+            -60
+        );
+        assert_eq!(
+            days_between(date(2026, 1, 1), date(2026, 3, 1), date_1900),
+            59
+        );
+        let date_1904 = DateSystem::Date1904;
+        assert_eq!(
+            days_between(date(1904, 1, 1), date(1904, 3, 1), date_1904),
+            60
+        );
     }
 
     #[test]
