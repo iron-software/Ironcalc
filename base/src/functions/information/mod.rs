@@ -424,6 +424,19 @@ impl<'a> Model<'a> {
                     // we just take the left cell of the range
                     left
                 }
+                // IronXL: the error of an `INDEX` or `IF` reference, such as the `#REF!` of
+                // `INDEX(B1:B2,3)`, is the result, as in Excel.
+                error @ CalcResult::Error { .. }
+                    if matches!(
+                        &args[1],
+                        Node::FunctionKind {
+                            kind: Function::Index | Function::If,
+                            ..
+                        }
+                    ) =>
+                {
+                    return error
+                }
                 _ => {
                     return CalcResult::Error {
                         error: Error::VALUE,
