@@ -928,6 +928,82 @@ pub(crate) fn parse_date(
     }
 }
 
+/// IronXL: the value of a time component of 1 or 2 digits from 0 to `maximum`.
+fn parse_time_component(text: &str, maximum: u32) -> Option<u32> {
+    if text.is_empty() || text.len() > 2 || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    text.parse::<u32>().ok().filter(|v| *v <= maximum)
+}
+
+/// IronXL: the milliseconds of 1 to 3 digits after the seconds, such as `25` in `12:00:00.25`.
+fn parse_time_milliseconds(digits: &str) -> Option<u32> {
+    if digits.is_empty() || digits.len() > 3 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let value = digits.parse::<u32>().ok()?;
+    Some(value * 10_u32.pow(3 - digits.len() as u32))
+}
+
+/// IronXL: reads a time text as Excel does, and gives the fraction of a day and a time format.
+///
+/// The grammar is:
+///
+/// time -> hour ":" minute [":" second ["." digits]] [space] [am_pm]
+/// hour -> 0 to 23, or 1 to 12 with am_pm; 1 or 2 digits
+/// minute, second -> 0 to 59; 1 or 2 digits
+/// digits -> 1 to 3 digits after the seconds
+/// am_pm -> "AM" | "PM", in any case
+///
+/// TIMEVALUE and the text-to-number cast (VALUE, an operator, a number argument) use this parser.
+pub(crate) fn parse_time(value: &str) -> Result<(f64, String), String> {
+    let error = || "Not a valid time".to_string();
+    let value = value.trim();
+    let upper = value.to_ascii_uppercase();
+    let (clock, is_pm) = if let Some(clock) = upper.strip_suffix("AM") {
+        (clock.trim_end(), Some(false))
+    } else if let Some(clock) = upper.strip_suffix("PM") {
+        (clock.trim_end(), Some(true))
+    } else {
+        (upper.as_str(), None)
+    };
+    let parts: Vec<&str> = clock.split(':').collect();
+    let (hour, minute, second) = match parts.as_slice() {
+        [hour, minute] => (*hour, *minute, None),
+        [hour, minute, second] => (*hour, *minute, Some(*second)),
+        _ => return Err(error()),
+    };
+    let (second, digits) = match second {
+        Some(second) => match second.split_once('.') {
+            Some((second, digits)) => (second, Some(digits)),
+            None => (second, None),
+        },
+        None => ("0", None),
+    };
+    let hour = parse_time_component(hour, 23).ok_or_else(error)?;
+    let minute = parse_time_component(minute, 59).ok_or_else(error)?;
+    let second = parse_time_component(second, 59).ok_or_else(error)?;
+    let milliseconds = match digits {
+        Some(digits) => parse_time_milliseconds(digits).ok_or_else(error)?,
+        None => 0,
+    };
+    let hour = match is_pm {
+        Some(_) if !(1..=12).contains(&hour) => return Err(error()),
+        Some(is_pm) => hour % 12 + if is_pm { 12 } else { 0 },
+        None => hour,
+    };
+    let total_milliseconds = ((hour * 60 + minute) * 60 + second) * 1000 + milliseconds;
+    let mut format = match (parts.len(), digits) {
+        (2, _) => "h:mm".to_string(),
+        (_, Some(digits)) => format!("h:mm:ss.{}", "0".repeat(digits.len())),
+        _ => "h:mm:ss".to_string(),
+    };
+    if is_pm.is_some() {
+        format.push_str(" AM/PM");
+    }
+    Ok((total_milliseconds as f64 / 86_400_000.0, format))
+}
+
 /// Parses a formatted number, returning the numeric value together with the format
 /// Uses heuristics to guess the format string
 /// "$ 123,345.678" => (123345.678, "$#,##0.00")
@@ -1009,6 +1085,11 @@ pub(crate) fn parse_formatted_number_with_date_system(
     // check if it is a date. NOTE: we don't trim the original here
     if let Ok((serial_number, format)) = parse_date(original, locale, date_system) {
         return Ok((serial_number as f64, Some(format)));
+    }
+
+    // IronXL: check if it is a time, such as 12:00:00.25
+    if let Ok((fraction, format)) = parse_time(value) {
+        return Ok((fraction, Some(format)));
     }
 
     // Lastly we check if it is a number

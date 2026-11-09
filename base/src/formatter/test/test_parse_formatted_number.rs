@@ -318,3 +318,53 @@ fn long_dates_with_dots() {
         Ok((45353.0, Some("mm.dd.yyyy".to_string())))
     );
 }
+
+// IronXL: a time text reads as the fraction of a day, with a time format.
+#[test]
+fn time() {
+    assert_eq!(parse("12:00", &["$"]), Ok((0.5, Some("h:mm".to_string()))));
+    assert_eq!(
+        parse(" 12:00:00 ", &["$"]),
+        Ok((0.5, Some("h:mm:ss".to_string())))
+    );
+    assert_eq!(
+        parse("12:00:00.25", &["$"]),
+        Ok((43_200.25 / 86_400.0, Some("h:mm:ss.00".to_string())))
+    );
+    assert_eq!(
+        parse("9:05:07.125", &["$"]),
+        Ok((0.3785546875, Some("h:mm:ss.000".to_string())))
+    );
+    assert_eq!(
+        parse("6:30:15.5 PM", &["$"]),
+        Ok((66_615.5 / 86_400.0, Some("h:mm:ss.0 AM/PM".to_string())))
+    );
+    assert_eq!(
+        parse("12:30am", &["$"]),
+        Ok((30.0 / 1_440.0, Some("h:mm AM/PM".to_string())))
+    );
+    assert_eq!(
+        parse("12:30 PM", &["$"]),
+        Ok((750.0 / 1_440.0, Some("h:mm AM/PM".to_string())))
+    );
+    for text in [
+        "12:00:00.2.5",
+        "12:00:00.x",
+        "12:00:00.",
+        "12:00:00.1234",
+        "12:00.5",
+        "24:00",
+        "12:60",
+        "12:00:60",
+        "123:00",
+        "1:2:3:4",
+        ":30",
+        "12:",
+        "13:00 PM",
+        "0:30 AM",
+        "12:00 XM",
+        "AM",
+    ] {
+        assert!(parse(text, &["$"]).is_err(), "{text}");
+    }
+}

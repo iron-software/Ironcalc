@@ -191,6 +191,7 @@ use crate::formatter::dates::permissive_date_to_serial_number;
 use crate::formatter::dates::serial_from_date;
 use crate::formatter::dates::DateSystem;
 use crate::formatter::dates::DATE_OUT_OF_RANGE_MESSAGE;
+use crate::formatter::format::parse_time;
 use crate::number_format::to_precision;
 use crate::{
     calc_result::CalcResult,
@@ -292,7 +293,14 @@ fn parse_time_string(text: &str) -> Option<f64> {
         }
     }
 
-    // Standard patterns
+    // IronXL: the shared time parser, also used by VALUE and the cast. It reads 1 to 3 digits
+    // after the seconds, such as 12:00:00.25.
+    if let Ok((time_fraction, _format)) = parse_time(text) {
+        return Some(time_fraction);
+    }
+
+    // Standard patterns. IronXL: they keep the earlier result of a text that the shared parser
+    // does not read, such as a second of 60 in 12:00:60.
     let patterns_time = ["%H:%M:%S", "%H:%M", "%I:%M %p", "%I %p", "%I:%M:%S %p"];
     for p in patterns_time {
         if let Ok(t) = NaiveTime::parse_from_str(text, p) {
