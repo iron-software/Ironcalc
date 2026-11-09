@@ -403,6 +403,9 @@ impl<'a> Model<'a> {
         }
     }
 
+    /// IronXL: the range operator gives the smallest range that holds both sides, as in Excel.
+    /// The order of the corners has no effect, and a side can hold more than one cell. Two sides
+    /// on different sheets, and a side that is not a reference, give `#VALUE!`.
     fn get_range(&mut self, left: &Node, right: &Node, cell: CellReferenceIndex) -> CalcResult {
         let left_result = self.evaluate_reference_node(left, cell);
         let right_result = self.evaluate_reference_node(right, cell);
@@ -416,23 +419,26 @@ impl<'a> Model<'a> {
                     left: left2,
                     right: right2,
                 },
-            ) => {
-                if left1.row == right1.row
-                    && left1.column == right1.column
-                    && left2.row == right2.row
-                    && left2.column == right2.column
-                {
-                    return CalcResult::Range {
-                        left: left1,
-                        right: right2,
-                    };
-                }
-                CalcResult::Error {
-                    error: Error::VALUE,
-                    origin: cell,
-                    message: "Invalid range".to_string(),
-                }
-            }
+            ) if left1.sheet == left2.sheet => CalcResult::Range {
+                left: CellReferenceIndex {
+                    sheet: left1.sheet,
+                    row: left1.row.min(right1.row).min(left2.row).min(right2.row),
+                    column: left1
+                        .column
+                        .min(right1.column)
+                        .min(left2.column)
+                        .min(right2.column),
+                },
+                right: CellReferenceIndex {
+                    sheet: left1.sheet,
+                    row: left1.row.max(right1.row).max(left2.row).max(right2.row),
+                    column: left1
+                        .column
+                        .max(right1.column)
+                        .max(left2.column)
+                        .max(right2.column),
+                },
+            },
             _ => CalcResult::Error {
                 error: Error::VALUE,
                 origin: cell,
