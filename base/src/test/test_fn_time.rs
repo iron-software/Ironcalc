@@ -456,7 +456,7 @@ fn test_timevalue_malformed_but_parseable() {
     // Test missing edge case: malformed but potentially parseable strings
     let model = test_time_expressions(&[
         // Test various malformed but potentially parseable time strings
-        ("A1", "=TIMEVALUE(\"14:30:00.123\")"), // Milliseconds (might be truncated)
+        ("A1", "=TIMEVALUE(\"14:30:00.123\")"), // Milliseconds
         ("A2", "=TIMEVALUE(\"14:30:00.999\")"), // High precision milliseconds
         ("A3", "=TIMEVALUE(\"02:30:00\")"),     // Leading zero hours
         ("A4", "=TIMEVALUE(\"2:05:00\")"),      // Single digit hour, zero-padded minute
@@ -474,9 +474,9 @@ fn test_timevalue_malformed_but_parseable() {
         ("D3", "=TIMEVALUE(\"23:59:60\")"), // Should error (invalid second)
     ]);
 
-    // Milliseconds are not supported, should return a #VALUE! error like Excel
-    assert_eq!(model._get_text("A1"), *"#VALUE!");
-    assert_eq!(model._get_text("A2"), *"#VALUE!");
+    // IronXL: Excel reads 1 to 3 digits after the seconds (IronXL #361)
+    assert_eq!(model._get_text("A1"), *"0.60416809");
+    assert_eq!(model._get_text("A2"), *"0.604178229");
 
     // Leading zeros should work fine
     assert_eq!(model._get_text("A3"), *TIME_2_30_AM); // 02:30:00 should parse as 2:30:00

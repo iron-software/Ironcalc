@@ -289,39 +289,27 @@ impl<'a> Model<'a> {
                 };
                 let locale = self.locale;
                 let date_system = self.date_system;
+                let format_item = |f: f64| {
+                    let d = format_number_with_date_system(f, &format_code, locale, date_system);
+                    if d.error.is_some() {
+                        ArrayNode::Error(Error::VALUE)
+                    } else {
+                        ArrayNode::String(d.text)
+                    }
+                };
                 let mut output = Vec::with_capacity(arr.len());
                 for row in arr {
                     let mut data_row = Vec::with_capacity(row.len());
                     for node in row {
                         let out = match node {
-                            ArrayNode::Number(f) => {
-                                let d = format_number_with_date_system(
-                                    f,
-                                    &format_code,
-                                    locale,
-                                    date_system,
-                                );
-                                if d.error.is_some() {
-                                    ArrayNode::Error(Error::VALUE)
-                                } else {
-                                    ArrayNode::String(d.text)
-                                }
-                            }
-                            ArrayNode::Empty => {
-                                let d = format_number_with_date_system(
-                                    0.0,
-                                    &format_code,
-                                    locale,
-                                    date_system,
-                                );
-                                if d.error.is_some() {
-                                    ArrayNode::Error(Error::VALUE)
-                                } else {
-                                    ArrayNode::String(d.text)
-                                }
-                            }
+                            ArrayNode::Number(f) => format_item(f),
+                            ArrayNode::Empty => format_item(0.0),
                             ArrayNode::Boolean(b) => ArrayNode::Boolean(b),
-                            ArrayNode::String(s) => ArrayNode::String(s),
+                            // IronXL: a text that reads as a number is formatted as the number.
+                            ArrayNode::String(s) => match self.cast_number(&s) {
+                                Some(f) if f.is_finite() => format_item(f),
+                                _ => ArrayNode::String(s),
+                            },
                             e @ ArrayNode::Error(_) => e,
                         };
                         data_row.push(out);
@@ -333,7 +321,12 @@ impl<'a> Model<'a> {
             other => {
                 let value = match other {
                     CalcResult::Number(f) => f,
-                    CalcResult::String(s) => return CalcResult::String(s),
+                    // IronXL: a text that reads as a number is formatted as the number, such as
+                    // TEXT("12:00:00.25","h:mm:ss.000"). Other text stays unchanged.
+                    CalcResult::String(s) => match self.cast_number(&s) {
+                        Some(f) if f.is_finite() => f,
+                        _ => return CalcResult::String(s),
+                    },
                     CalcResult::Boolean(b) => return CalcResult::Boolean(b),
                     error @ CalcResult::Error { .. } => return error,
                     CalcResult::Range { .. } => {
