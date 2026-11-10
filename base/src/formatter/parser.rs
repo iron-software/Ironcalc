@@ -211,7 +211,9 @@ impl Parser {
                     // If it is in between digit tokens then we use the thousand separator
                     if last_token_is_digit && next_token_is_digit {
                         use_thousands = true;
-                    } else if digit_count > 0 {
+                    } else if digit_count > 0 || precision > 0 {
+                        // IronXL: a comma after a digit placeholder after the point also divides
+                        // the value by 1000, as Excel shows 123456789 with `.0,` as `123456.8`.
                         comma += 1;
                     } else {
                         // Before the number is just a literal.

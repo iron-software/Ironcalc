@@ -128,3 +128,46 @@ fn rounding_reads_fifteen_significant_digits() {
         (123_456_789_012_345_680.0, "0", "123456789012345680"),
     ]);
 }
+
+// IronXL: a comma after the digit placeholders after the point divides the value by 1000, as a
+// comma after the digit placeholders before the point does.
+#[test]
+fn comma_after_the_decimal_digits_scales_the_value() {
+    assert_texts(&[
+        (123_456_789.0, ".0,", "123456.8"),
+        (123_456_789.0, ".00,", "123456.79"),
+        (123_456_789.0, ".0,,", "123.5"),
+        (123_456_789.0, "0.0,", "123456.8"),
+        (1234.0, ",.0", ",1234.0"),
+    ]);
+}
+
+// IronXL: a value below 1E-308 or near 1.8E+308 gives a finite mantissa.
+#[test]
+fn scientific_mantissa_of_a_very_small_or_large_value_is_finite() {
+    assert_texts(&[
+        (1e-310, "0.0E+0", "1.0E-310"),
+        (1e-310, "0E+0", "1E-310"),
+        (1e-310, ".0E+0", ".1E-309"),
+        (-1e-310, "0.0E+0", "-1.0E-310"),
+        (5e-324, "0.0E+0", "5.0E-324"),
+        (1.797_693_134_862_315_7e308, "0.0E+0", "1.8E+308"),
+        (1.797_693_134_862_315_7e308, ".0E+0", ".2E+309"),
+        (9.999_999_999_999_99e307, "0.0E+0", "1.0E+308"),
+    ]);
+}
+
+// IronXL: `@` in a section with no digit placeholder shows the General text of the number.
+#[test]
+fn text_section_shows_the_general_text_of_a_number() {
+    assert_texts(&[
+        (0.5, "@", "0.5"),
+        (0.25, "@", "0.25"),
+        (-0.5, "@", "-0.5"),
+        (1234.5678, "@", "1234.5678"),
+        (0.0, "@", "0"),
+        (0.5, "\"a\"@", "a0.5"),
+        (-0.5, "@;@", "0.5"),
+        (0.5, "0;@", "1"),
+    ]);
+}
