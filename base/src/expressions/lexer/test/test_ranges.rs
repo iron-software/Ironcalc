@@ -518,3 +518,74 @@ fn range_operator() {
     assert!(matches!(lx.next_token(), RightParenthesis));
     assert_eq!(lx.next_token(), EOF);
 }
+
+#[test]
+fn range_operator_after_a_sheet_reference() {
+    // IronXL: with no cell after the ':', a sheet-qualified reference or a reference with '$'
+    // is one cell, and the ':' is the range operator, as without a sheet.
+    for formula in [
+        "Sheet1!E1:OFFSET(F2,0,0)",
+        "'Sheet 1'!E1:OFFSET(F2,0,0)",
+        "$E$1:OFFSET(F2,0,0)",
+        "E$1:OFFSET(F2,0,0)",
+    ] {
+        let mut lx = new_lexer(formula);
+        assert!(matches!(lx.next_token(), Reference { .. }), "{formula}");
+        assert_eq!(lx.next_token(), Colon, "{formula}");
+        assert_eq!(lx.next_token(), Ident("OFFSET".to_string()), "{formula}");
+    }
+
+    let mut lx = new_lexer("Sheet2!A2:Remote");
+    assert_eq!(
+        lx.next_token(),
+        Reference {
+            sheet: Some("Sheet2".to_string()),
+            row: 2,
+            column: 1,
+            absolute_column: false,
+            absolute_row: false
+        }
+    );
+    assert_eq!(lx.next_token(), Colon);
+    assert_eq!(lx.next_token(), Ident("Remote".to_string()));
+    assert_eq!(lx.next_token(), EOF);
+
+    let mut lx = new_lexer("Sheet2!A1:Sheet2!A2");
+    assert!(matches!(lx.next_token(), Reference { .. }));
+    assert_eq!(lx.next_token(), Colon);
+    assert!(matches!(lx.next_token(), Reference { .. }));
+    assert_eq!(lx.next_token(), EOF);
+
+    // A ':' at the end stays a ':' for the parser, which refuses it.
+    let mut lx = new_lexer("Sheet1!$E$1:");
+    assert!(matches!(lx.next_token(), Reference { .. }));
+    assert_eq!(lx.next_token(), Colon);
+    assert_eq!(lx.next_token(), EOF);
+}
+
+#[test]
+fn range_operator_after_a_sheet_reference_r1c1() {
+    // IronXL: the R1C1 lexer reads the stored text of the same formulas as the A1 lexer does.
+    for formula in [
+        "Sheet1!R[-2]C[-3]:OFFSET(R[-1]C[-2],0,0)",
+        "Sheet2!R2C1:Remote",
+        "Sheet2!R1C1:Sheet2!R2C1",
+    ] {
+        let mut lx = new_lexer(formula);
+        lx.set_lexer_mode(LexerMode::R1C1);
+        assert!(matches!(lx.next_token(), Reference { .. }), "{formula}");
+        assert_eq!(lx.next_token(), Colon, "{formula}");
+        assert!(!matches!(lx.next_token(), Illegal(_)), "{formula}");
+    }
+
+    let mut lx = new_lexer("Sheet1!R1C1:R2C2");
+    lx.set_lexer_mode(LexerMode::R1C1);
+    assert!(matches!(lx.next_token(), Range { .. }));
+    assert_eq!(lx.next_token(), EOF);
+
+    let mut lx = new_lexer("Sheet1!R1C1:");
+    lx.set_lexer_mode(LexerMode::R1C1);
+    assert!(matches!(lx.next_token(), Reference { .. }));
+    assert_eq!(lx.next_token(), Colon);
+    assert_eq!(lx.next_token(), EOF);
+}

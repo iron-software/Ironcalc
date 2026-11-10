@@ -80,6 +80,7 @@ impl<'a> Lexer<'a> {
             Ok(cell) => {
                 if self.peek_char() == Some(':') {
                     // It's a range
+                    let colon = self.position;
                     self.position += 1;
                     if let Ok(cell2) = self.consume_reference_a1() {
                         Ok(ParsedRange {
@@ -87,7 +88,13 @@ impl<'a> Lexer<'a> {
                             right: Some(cell2),
                         })
                     } else {
-                        Err(self.set_error("Expecting reference in range", self.position))
+                        // IronXL: no cell follows the ':', so it is the range operator, as in Sheet1!A1:OFFSET(B1,0,0)
+                        // or $A$1:Name. Give the cell and leave the ':' to the parser, as the path without a sheet does.
+                        self.position = colon;
+                        Ok(ParsedRange {
+                            left: cell,
+                            right: None,
+                        })
                     }
                 } else {
                     // just a reference
@@ -215,6 +222,7 @@ impl<'a> Lexer<'a> {
             Ok(cell) => {
                 if self.peek_char() == Some(':') {
                     // It's a range
+                    let colon = self.position;
                     self.position += 1;
                     if let Ok(cell2) = self.consume_reference_r1c1() {
                         Ok(ParsedRange {
@@ -222,7 +230,13 @@ impl<'a> Lexer<'a> {
                             right: Some(cell2),
                         })
                     } else {
-                        Err(self.set_error("Expecting reference in range", self.position))
+                        // IronXL: no cell follows the ':', so it is the range operator, as in Sheet1!R1C1:OFFSET(R2C2,0,0).
+                        // Give the cell and leave the ':' to the parser, as the A1 path does.
+                        self.position = colon;
+                        Ok(ParsedRange {
+                            left: cell,
+                            right: None,
+                        })
                     }
                 } else {
                     // just a reference
