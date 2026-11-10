@@ -277,6 +277,14 @@ pub fn format_number_with_date_system(
     let mut value = value_original;
     let part;
     match parts.len() {
+        // IronXL: an empty code has no section and shows the empty text, as Excel does.
+        0 => {
+            return Formatted {
+                text: String::new(),
+                color: None,
+                error: None,
+            };
+        }
         1 => {
             part = &parts[0];
         }
