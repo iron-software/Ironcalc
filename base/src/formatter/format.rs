@@ -1039,6 +1039,29 @@ pub(crate) fn parse_time(value: &str) -> Result<(f64, String), String> {
     Ok((total_milliseconds as f64 / 86_400_000.0, format))
 }
 
+/// IronXL: reads a date text, then white space, then a time text, as Excel does, such as
+/// `1/2/2020 12:00`. Gives the date serial number plus the fraction of the day, and the date
+/// format then the time format.
+///
+/// `parse_date` reads the date part and `parse_time` reads the time part.
+pub(crate) fn parse_date_time(
+    value: &str,
+    locale: &Locale,
+    date_system: DateSystem,
+) -> Result<(f64, String), String> {
+    let error = || "Not a valid date and time".to_string();
+    let (date, time) = value
+        .trim()
+        .split_once(char::is_whitespace)
+        .ok_or_else(error)?;
+    let (serial_number, date_format) = parse_date(date, locale, date_system)?;
+    let (fraction, time_format) = parse_time(time)?;
+    Ok((
+        serial_number as f64 + fraction,
+        format!("{date_format} {time_format}"),
+    ))
+}
+
 /// Parses a formatted number, returning the numeric value together with the format
 /// Uses heuristics to guess the format string
 /// "$ 123,345.678" => (123345.678, "$#,##0.00")
@@ -1125,6 +1148,11 @@ pub(crate) fn parse_formatted_number_with_date_system(
     // IronXL: check if it is a time, such as 12:00:00.25
     if let Ok((fraction, format)) = parse_time(value) {
         return Ok((fraction, Some(format)));
+    }
+
+    // IronXL: check if it is a date and a time, such as 1/2/2020 12:00
+    if let Ok((serial_number, format)) = parse_date_time(value, locale, date_system) {
+        return Ok((serial_number, Some(format)));
     }
 
     // Lastly we check if it is a number
