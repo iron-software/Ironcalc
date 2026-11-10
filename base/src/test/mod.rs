@@ -41,6 +41,7 @@ mod test_ifs_range_size;
 mod test_index_reference;
 mod test_long_chains;
 mod test_lookup_criteria_reference;
+mod test_name_range_sheet_reference;
 mod test_name_reference;
 mod test_range_operator;
 mod test_sheet_qualified_defined_names;

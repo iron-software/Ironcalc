@@ -878,9 +878,27 @@ impl<'a> Parser<'a> {
         Ok(row)
     }
 
+    // IronXL: a 3-D reference needs a first end that is a sheet, or that no defined name in scope has. Else a text
+    // such as `Remote:Sheet2!A2` is the name `Remote`, the range operator, and a reference on `Sheet2`.
+    fn is_three_d_first_end(&self, end: &str) -> bool {
+        self.get_sheet_index_by_name_without_case(end).is_some()
+            || self
+                .get_sheet_index_by_name(&self.context.sheet)
+                .and_then(|sheet| self.get_defined_name(end, sheet))
+                .is_none()
+    }
+
     fn parse_primary(&mut self) -> Node {
-        if let Some((first_sheet, last_sheet, left, right)) = self.lexer.consume_three_d_reference()
-        {
+        let start = self.lexer.get_position();
+        let three_d = self.lexer.consume_three_d_reference();
+        let three_d = match three_d {
+            Some((first_sheet, ..)) if !self.is_three_d_first_end(&first_sheet) => {
+                self.lexer.set_position(start);
+                None
+            }
+            three_d => three_d,
+        };
+        if let Some((first_sheet, last_sheet, left, right)) = three_d {
             let reference = match right {
                 Some(right) => self.range_node(None, left, right),
                 None => self.reference_node(
