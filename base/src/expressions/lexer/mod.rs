@@ -167,6 +167,13 @@ impl<'a> Lexer<'a> {
         self.position as i32
     }
 
+    /// IronXL: moves the lexer back to `position`, a value of [`get_position`](Self::get_position), and drops a
+    /// pending peek.
+    pub fn set_position(&mut self, position: i32) {
+        self.position = position as usize;
+        self.next_token_position = None;
+    }
+
     /// Resets the formula
     pub fn set_formula(&mut self, content: &str) {
         self.chars = content.chars().collect();
