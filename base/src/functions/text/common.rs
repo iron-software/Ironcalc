@@ -490,39 +490,16 @@ impl<'a> Model<'a> {
     }
 
     // LEN, LEFT, RIGHT, MID, LOWER, UPPER, TRIM
+    /// LEN gives the character count of the text of each item. A range or an
+    /// array argument gives an array of counts in the same shape.
     pub(crate) fn fn_len(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
-        if args.len() == 1 {
-            let s = match self.evaluate_node_in_context(&args[0], cell) {
-                CalcResult::Number(v) => format!("{v}"),
-                CalcResult::String(v) => v,
-                CalcResult::Boolean(b) => {
-                    if b {
-                        "TRUE".to_string()
-                    } else {
-                        "FALSE".to_string()
-                    }
-                }
-                error @ CalcResult::Error { .. } => return error,
-                CalcResult::Range { .. } => {
-                    // Implicit Intersection not implemented
-                    return CalcResult::Error {
-                        error: Error::NIMPL,
-                        origin: cell,
-                        message: "Implicit Intersection not implemented".to_string(),
-                    };
-                }
-                CalcResult::EmptyCell | CalcResult::EmptyArg => "".to_string(),
-                CalcResult::Array(_) | CalcResult::Lambda(_) => {
-                    return CalcResult::Error {
-                        error: Error::NIMPL,
-                        origin: cell,
-                        message: "Arrays not supported yet".to_string(),
-                    }
-                }
-            };
-            return CalcResult::Number(s.chars().count() as f64);
-        }
-        CalcResult::new_args_number_error(cell)
+        self.map_text_unary(
+            args,
+            cell,
+            |s| s.chars().count() as f64,
+            CalcResult::Number,
+            ArrayNode::Number,
+        )
     }
 
     pub(crate) fn fn_trim(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
@@ -584,18 +561,32 @@ impl<'a> Model<'a> {
         cell: CellReferenceIndex,
         f: impl Fn(&str) -> String,
     ) -> CalcResult {
+        self.map_text_unary(args, cell, f, CalcResult::String, ArrayNode::String)
+    }
+
+    /// Applies a single-argument transform of the text of each item element-wise.
+    /// `to_result` wraps the value of a scalar argument; `to_node` wraps the value of
+    /// each item of a range or array argument. An error item stays in its position.
+    pub(crate) fn map_text_unary<T>(
+        &mut self,
+        args: &[Node],
+        cell: CellReferenceIndex,
+        f: impl Fn(&str) -> T,
+        to_result: impl Fn(T) -> CalcResult,
+        to_node: impl Fn(T) -> ArrayNode,
+    ) -> CalcResult {
         if args.len() != 1 {
             return CalcResult::new_args_number_error(cell);
         }
         match self.get_string_or_array(&args[0], cell) {
-            Ok(crate::cast::StringOrArray::String(s)) => CalcResult::String(f(&s)),
+            Ok(crate::cast::StringOrArray::String(s)) => to_result(f(&s)),
             Ok(crate::cast::StringOrArray::Array(arr)) => CalcResult::Array(
                 arr.iter()
                     .map(|row| {
                         row.iter()
-                            .map(|n| match crate::cast::array_node_to_string(n) {
-                                Ok(s) => crate::expressions::parser::ArrayNode::String(f(&s)),
-                                Err(e) => crate::expressions::parser::ArrayNode::Error(e),
+                            .map(|n| match array_node_to_string(n) {
+                                Ok(s) => to_node(f(&s)),
+                                Err(e) => ArrayNode::Error(e),
                             })
                             .collect()
                     })

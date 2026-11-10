@@ -1762,7 +1762,7 @@ fn static_analysis_on_function(kind: &Function, args: &[Node]) -> StaticResult {
         Function::Find => not_implemented(args),
         // LEFT/MID/RIGHT broadcast element-wise: an array/range argument yields an array.
         Function::Left => scalar_arguments(args),
-        Function::Len => not_implemented(args),
+        Function::Len => scalar_arguments(args),
         // UPPER/LOWER broadcast element-wise: an array/range argument yields an array.
         Function::Lower => scalar_arguments(args),
         Function::Mid => scalar_arguments(args),
