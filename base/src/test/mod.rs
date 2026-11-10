@@ -151,6 +151,7 @@ mod test_set_functions_error_handling;
 mod test_shared_formula_index;
 mod test_sheet_names;
 mod test_spill_functions;
+mod test_text_empty_code;
 mod test_text_locale_tags;
 mod test_text_point_codes;
 mod test_text_section;
