@@ -1,7 +1,12 @@
 #![allow(clippy::unwrap_used)]
 
 use crate::{
-    formatter::format::parse_formatted_number,
+    formatter::{
+        dates::DateSystem,
+        format::{
+            parse_date_time, parse_formatted_number, parse_formatted_number_with_date_system,
+        },
+    },
     locale::{get_default_locale, get_locale},
 };
 
@@ -367,4 +372,76 @@ fn time() {
     ] {
         assert!(parse(text, &["$"]).is_err(), "{text}");
     }
+}
+
+// IronXL: a date text, then white space, then a time text, reads as the date serial number
+// plus the fraction of the day, with the date format and the time format.
+#[test]
+fn date_and_time() {
+    assert_eq!(
+        parse("1/2/2020 12:00", &["$"]),
+        Ok((43832.5, Some("m/d/yyyy h:mm".to_string())))
+    );
+    assert_eq!(
+        parse(" 1/2/2020   12:00 ", &["$"]),
+        Ok((43832.5, Some("m/d/yyyy h:mm".to_string())))
+    );
+    assert_eq!(
+        parse("1/2/2020 12:00:00.25", &["$"]),
+        Ok((
+            43832.0 + 43_200.25 / 86_400.0,
+            Some("m/d/yyyy h:mm:ss.00".to_string())
+        ))
+    );
+    assert_eq!(
+        parse("1/2/2020 6:30 PM", &["$"]),
+        Ok((
+            43832.0 + 1_110.0 / 1_440.0,
+            Some("m/d/yyyy h:mm AM/PM".to_string())
+        ))
+    );
+    assert_eq!(
+        parse("2020-01-02 12:00", &["$"]),
+        Ok((43832.5, Some("yyyy-mm-dd h:mm".to_string())))
+    );
+    assert_eq!(
+        parse("02.01.2020\t6:00", &["$"]),
+        Ok((43862.25, Some("mm.dd.yyyy h:mm".to_string())))
+    );
+    assert_eq!(
+        parse_de("2.1.2020 12:00", &["€"]),
+        Ok((43832.5, Some("d.m.yyyy h:mm".to_string())))
+    );
+    for text in [
+        "1/2/2020 12:60",
+        "1/2/2020 abc",
+        "1/2/2020 24:00",
+        "2/30/2020 12:00",
+        "abc 12:00",
+        "12:00 1/2/2020",
+        "1/2/2020 12:00 1",
+        "1/2 12:00",
+        "1/2/2020T12:00",
+    ] {
+        assert!(parse(text, &["$"]).is_err(), "{text}");
+    }
+}
+
+// IronXL: the date part of a date and time text gives a serial number of the date system.
+#[test]
+fn date_and_time_in_the_1904_date_system() {
+    let locale = get_default_locale();
+    assert_eq!(
+        parse_formatted_number_with_date_system(
+            "1/2/2020 12:00",
+            &["$"],
+            locale,
+            DateSystem::Date1904
+        ),
+        Ok((42370.5, Some("m/d/yyyy h:mm".to_string())))
+    );
+    assert_eq!(
+        parse_date_time("1/2/2020", locale, DateSystem::Date1900),
+        Err("Not a valid date and time".to_string())
+    );
 }
