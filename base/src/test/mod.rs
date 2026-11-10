@@ -159,6 +159,7 @@ mod test_sheet_names;
 mod test_spill_functions;
 mod test_text_empty_code;
 mod test_text_locale_tags;
+mod test_text_negative_sign;
 mod test_text_point_codes;
 mod test_text_section;
 mod test_time_text;
