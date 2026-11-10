@@ -431,7 +431,7 @@ fn not_implemented(_args: &[Node]) -> StaticResult {
     StaticResult::Scalar
 }
 
-/// SUMIF spills according to the shape of its criteria argument (`args[1]`); the
+/// SUMIF and COUNTIF spill according to the shape of their criteria argument (`args[1]`); the
 /// criteria_range and sum_range arguments are consumed, not broadcast. A scalar
 /// criterion yields a scalar; a range/array criterion yields an array of the
 /// same dimensions.
@@ -605,8 +605,9 @@ fn args_signature_sumif(arg_count: usize) -> Vec<Signature> {
 
 /// SUMIF signature with the criteria argument as a `Vector` instead of a
 /// `Scalar`. This stops a range/array criteria from being collapsed by implicit
-/// intersection, so SUMIF can spill one sum per criterion. (COUNTIF/AVERAGEIF
-/// keep the classic [`args_signature_sumif`], intersecting range criteria.)
+/// intersection, so SUMIF can spill one sum per criterion. IronXL: COUNTIF uses it
+/// too, and spills one count per criterion. (AVERAGEIF keeps the classic
+/// [`args_signature_sumif`], intersecting range criteria.)
 fn args_signature_sumif_spill(arg_count: usize) -> Vec<Signature> {
     if arg_count == 2 {
         vec![Signature::Vector, Signature::Vector]
@@ -1156,7 +1157,7 @@ fn get_function_args_signature(kind: &Function, arg_count: usize) -> Vec<Signatu
         Function::Count => vec![Signature::Vector; arg_count],
         Function::Counta => vec![Signature::Vector; arg_count],
         Function::Countblank => vec![Signature::Vector; arg_count],
-        Function::Countif => args_signature_sumif(arg_count),
+        Function::Countif => args_signature_sumif_spill(arg_count),
         Function::Countifs => vec![Signature::Vector; arg_count],
         Function::Maxifs => vec![Signature::Vector; arg_count],
         Function::Minifs => vec![Signature::Vector; arg_count],
@@ -1827,7 +1828,7 @@ fn static_analysis_on_function(kind: &Function, args: &[Node]) -> StaticResult {
         Function::Count => not_implemented(args),
         Function::Counta => not_implemented(args),
         Function::Countblank => not_implemented(args),
-        Function::Countif => not_implemented(args),
+        Function::Countif => sumif_static_result(args),
         Function::Countifs => not_implemented(args),
         Function::Maxifs => not_implemented(args),
         Function::Minifs => not_implemented(args),
