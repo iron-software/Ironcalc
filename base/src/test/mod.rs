@@ -161,6 +161,7 @@ mod test_time_text;
 mod test_today;
 mod test_trigonometric_reciprocals;
 mod test_types;
+mod test_unary_array;
 mod test_wildcard_escapes;
 mod text_functions;
 mod user_model;

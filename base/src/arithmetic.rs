@@ -171,6 +171,34 @@ impl<'a> Model<'a> {
         }
     }
 
+    /// IronXL: applies the unary `op` to a number, or to each element of an array or a range, as in
+    /// Excel. The result keeps the shape of the operand. Each element follows the rule of
+    /// `handle_arithmetic`, and an element error stays that error.
+    pub(crate) fn handle_unary(
+        &mut self,
+        right: &Node,
+        cell: CellReferenceIndex,
+        op: &dyn Fn(f64) -> f64,
+    ) -> CalcResult {
+        match self.get_number_or_array(right, cell) {
+            Ok(NumberOrArray::Number(f)) => CalcResult::Number(op(f)),
+            Ok(NumberOrArray::Array(array)) => CalcResult::Array(
+                array
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|node| match to_f64(node) {
+                                Ok(f) => ArrayNode::Number(op(f)),
+                                Err(error) => ArrayNode::Error(error),
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            ),
+            Err(error) => error,
+        }
+    }
+
     /// Applies the concatenation operator (`&`) element-wise.
     /// When either operand is a range or array the result is an array of strings;
     /// when both are scalars the result is a single String.
