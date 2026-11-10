@@ -108,12 +108,22 @@ fn scientific(value: f64, whole: i32, decimals: i32) -> (f64, i32) {
     if whole == 0 {
         exponent += 1;
     }
-    let mut mantissa = rounded(size / 10.0_f64.powi(exponent), decimals);
+    let mut mantissa = rounded(scaled(&form, exponent), decimals);
     if mantissa >= 10.0_f64.powi(whole) {
         exponent += step;
-        mantissa = rounded(size / 10.0_f64.powi(exponent), decimals);
+        mantissa = rounded(scaled(&form, exponent), decimals);
     }
     (mantissa.copysign(value), exponent)
+}
+
+/// IronXL: the value of `form`, the `{:e}` text of a value, divided by 10 to the `exponent`. The
+/// power is only the small difference of the two exponents, so a value below 1E-308 or near
+/// 1.8E+308 gives a finite mantissa, as Excel shows 1E-310 with `0.0E+0` as `1.0E-310`.
+fn scaled(form: &str, exponent: i32) -> f64 {
+    let (digits, own) = form.split_once('e').unwrap_or((form, "0"));
+    let digits: f64 = digits.parse().unwrap_or_default();
+    let own: i32 = own.parse().unwrap_or_default();
+    digits * 10.0_f64.powi(own - exponent)
 }
 
 /// IronXL: the General text of `value` for `TEXT`, as Excel gives it, with at most 11 characters
@@ -732,6 +742,8 @@ fn format_number_with_general(
                 text = format!("{c}");
             }
             let tokens = &p.tokens;
+            // IronXL: a section with no digit placeholder, such as `@`, does not round the value.
+            let has_digits = p.digit_count > 0 || p.precision > 0 || p.is_scientific;
             value = value * 100.0_f64.powi(p.percent) / (1000.0_f64.powi(p.comma));
             let mut exponent_part: Vec<char> = vec![];
             let mut exponent_is_negative = false;
@@ -741,7 +753,7 @@ fn format_number_with_general(
                 exponent_part = format!("{}", exponent.abs()).chars().collect();
                 exponent_is_negative = exponent < 0;
                 value = mantissa;
-            } else {
+            } else if has_digits {
                 // p.precision is the number of digits _after_ the decimal point
                 value = rounded(value, p.precision);
             }
@@ -793,7 +805,13 @@ fn format_number_with_general(
                         text = format!("{text} ");
                     }
                     TextToken::Raw => {
-                        text = format!("{text}{value}");
+                        // IronXL: `@` in a section with no digit placeholder shows the General text
+                        // of the number, as Excel shows 0.5 with `@` as `0.5`.
+                        if has_digits {
+                            text = format!("{text}{value}");
+                        } else {
+                            text = format!("{text}{}", general(value));
+                        }
                     }
                     TextToken::Period => {
                         // IronXL: with no digit placeholder before the point, the sign and the

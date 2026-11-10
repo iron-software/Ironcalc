@@ -51,3 +51,32 @@ fn text_shows_the_exponent_of_excel() {
         ("=TEXT(-1234,\".0E+0\")", "-.1E+4"),
     ]);
 }
+
+#[test]
+fn text_scales_by_a_comma_after_the_decimal_digits() {
+    assert_results(&[
+        ("=TEXT(123456789,\".0,\")", "123456.8"),
+        ("=TEXT(123456789,\"0.0,\")", "123456.8"),
+    ]);
+}
+
+#[test]
+fn text_shows_a_finite_mantissa_for_a_very_small_or_large_value() {
+    assert_results(&[
+        ("=TEXT(1E-310,\"0.0E+0\")", "1.0E-310"),
+        ("=TEXT(1E-310,\"0E+0\")", "1E-310"),
+        ("=TEXT(1.7976931348623157E+308,\".0E+0\")", ".2E+309"),
+    ]);
+}
+
+#[test]
+fn text_shows_a_number_with_a_text_section_as_general() {
+    assert_results(&[
+        ("=TEXT(0.5,\"@\")", "0.5"),
+        ("=TEXT(0.25,\"@\")", "0.25"),
+        ("=TEXT(-0.5,\"@\")", "-0.5"),
+        ("=TEXT(1234.5678,\"@\")", "1234.5678"),
+        ("=TEXT(12.123456789123,\"@\")", "12.12345679"),
+        ("=TEXT(0.5,\"\"\"a\"\"@\")", "a0.5"),
+    ]);
+}
