@@ -4,23 +4,34 @@ use regex_lite as regex;
 use crate::{
     calc_result::CalcResult,
     expressions::token::{is_english_error_string, Error},
-    formatter::{dates::DateSystem, format::parse_date},
+    formatter::{
+        dates::DateSystem,
+        format::{parse_date, parse_date_time, parse_percent, parse_time},
+    },
     locale::Locale,
     number_format::to_excel_precision,
 };
 
-/// If `s` looks like a date literal in the given locale, return its Excel
-/// serial number as `f64`. Pure numeric strings are rejected here because the
-/// numeric branch in `build_criteria` handles them already, and date parsing
-/// must not shadow the simpler number path.
-fn parse_date_criterion(s: &str, locale: &Locale, date_system: DateSystem) -> Option<f64> {
+/// IronXL: if `s` is a date, a time, a date and time, or a percent text in the given locale, return its number as
+/// `f64`: a date gives its serial number, a time its fraction of a day, and a percent the number divided by 100.
+/// Pure numeric strings are rejected here because the numeric branch in `build_criteria` handles them already, and
+/// these parsers must not shadow the simpler number path.
+///
+/// The shared parsers of the text-to-number cast read the text: `parse_date`, `parse_time`, `parse_date_time`, and
+/// `parse_percent`.
+fn parse_number_criterion(s: &str, locale: &Locale, date_system: DateSystem) -> Option<f64> {
     let trimmed = s.trim();
     if trimmed.is_empty() || trimmed.parse::<f64>().is_ok() {
         return None;
     }
-    parse_date(trimmed, locale, date_system)
+    if let Ok((serial, _)) = parse_date(trimmed, locale, date_system) {
+        return Some(serial as f64);
+    }
+    parse_time(trimmed)
+        .or_else(|_| parse_date_time(trimmed, locale, date_system))
+        .or_else(|_| parse_percent(trimmed, locale))
         .ok()
-        .map(|(serial, _)| serial as f64)
+        .map(|(number, _)| number)
 }
 
 fn error_sort_rank(e: &Error) -> u8 {
@@ -396,7 +407,8 @@ pub(crate) fn build_criteria_with_date_system<'a>(
     }
 }
 
-/// IronXL: the criterion of a criteria text, by the rules of `build_criteria_with_date_system`. The white space after
+/// IronXL: the criterion of a criteria text, by the rules of `build_criteria_with_date_system`. A date, a time, a date
+/// and time, or a percent text compares as its number, such as `">=12:00"` with 0.5. The white space after
 /// an operator (`=`, `<>`, `<`, `>`, `<=`, `>=`) does not count, so `"> 1000"` compares with the number 1000, as in Excel.
 pub(crate) fn build_text_criteria<'a>(
     s: &'a str,
@@ -411,7 +423,7 @@ pub(crate) fn build_text_criteria<'a>(
             Box::new(move |x| result_is_less_or_equal_than_number(x, f))
         } else if v.is_empty() {
             Box::new(move |_x| false)
-        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+        } else if let Some(f) = parse_number_criterion(v, locale, date_system) {
             Box::new(move |x| result_is_less_or_equal_than_number(x, f))
         } else {
             Box::new(move |x| result_is_less_or_equal_than_string(x, &v.to_lowercase()))
@@ -424,7 +436,7 @@ pub(crate) fn build_text_criteria<'a>(
             Box::new(move |x| result_is_greater_or_equal_than_number(x, f))
         } else if v.is_empty() {
             Box::new(move |_x| false)
-        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+        } else if let Some(f) = parse_number_criterion(v, locale, date_system) {
             Box::new(move |x| result_is_greater_or_equal_than_number(x, f))
         } else {
             Box::new(move |x| result_is_greater_or_equal_than_string(x, &v.to_lowercase()))
@@ -446,7 +458,7 @@ pub(crate) fn build_text_criteria<'a>(
             }
         } else if v.is_empty() {
             Box::new(result_is_not_equal_to_empty)
-        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+        } else if let Some(f) = parse_number_criterion(v, locale, date_system) {
             Box::new(move |x| result_is_not_equal_to_number(x, f))
         } else {
             Box::new(move |x| result_is_not_equal_to_string(x, &v.to_lowercase()))
@@ -459,7 +471,7 @@ pub(crate) fn build_text_criteria<'a>(
             Box::new(move |x| result_is_less_than_number(x, f))
         } else if v.is_empty() {
             Box::new(move |_x| false)
-        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+        } else if let Some(f) = parse_number_criterion(v, locale, date_system) {
             Box::new(move |x| result_is_less_than_number(x, f))
         } else {
             Box::new(move |x| result_is_less_than_string(x, &v.to_lowercase()))
@@ -472,7 +484,7 @@ pub(crate) fn build_text_criteria<'a>(
             Box::new(move |x| result_is_greater_than_number(x, f))
         } else if v.is_empty() {
             Box::new(move |_x| false)
-        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+        } else if let Some(f) = parse_number_criterion(v, locale, date_system) {
             Box::new(move |x| result_is_greater_than_number(x, f))
         } else {
             Box::new(move |x| result_is_greater_than_string(x, &v.to_lowercase()))
@@ -497,7 +509,7 @@ pub(crate) fn build_text_criteria<'a>(
             } else {
                 Box::new(move |_| false)
             }
-        } else if let Some(f) = parse_date_criterion(v, locale, date_system) {
+        } else if let Some(f) = parse_number_criterion(v, locale, date_system) {
             Box::new(move |x| result_is_equal_to_number(x, f))
         } else {
             Box::new(move |x| result_is_equal_to_string(x, &v.to_lowercase()))
