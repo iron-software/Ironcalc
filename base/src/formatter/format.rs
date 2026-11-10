@@ -159,6 +159,38 @@ pub fn text_function_code(code: &str) -> String {
     }
 }
 
+/// IronXL: the text that the code `format` shows for the text `value`, as Excel shows it. The text
+/// section is the fourth section, or the only section when it holds `@`. Quoted text and literals
+/// show as they are, `@` shows `value`, and `_x` and `*x` show one space, as for a number. A color
+/// shows nothing. None when the code has no text section, or the section holds a token for a
+/// number or a date, such as `0`.
+pub fn format_text(value: &str, format: &str) -> Option<String> {
+    let mut parser = Parser::new(format);
+    parser.parse();
+    let part = match parser.parts.as_slice() {
+        [part] => part,
+        [_, _, _, part] => part,
+        _ => return None,
+    };
+    let ParsePart::Number(p) = part else {
+        return None;
+    };
+    if parser.parts.len() == 1 && !p.tokens.iter().any(|t| matches!(t, TextToken::Raw)) {
+        return None;
+    }
+    let mut text = p.currency.map(String::from).unwrap_or_default();
+    for token in &p.tokens {
+        match token {
+            TextToken::Literal(c) => text.push(*c),
+            TextToken::Text(t) => text.push_str(t),
+            TextToken::Ghost(_) | TextToken::Spacer(_) => text.push(' '),
+            TextToken::Raw => text.push_str(value),
+            _ => return None,
+        }
+    }
+    Some(text)
+}
+
 pub fn format_number(value_original: f64, format: &str, locale: &Locale) -> Formatted {
     format_number_with_date_system(value_original, format, locale, DateSystem::Date1900)
 }

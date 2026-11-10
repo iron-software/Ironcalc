@@ -9,4 +9,5 @@ mod test_locale_tags;
 mod test_parse_formatted_number;
 mod test_scientific;
 mod test_special_dollar;
+mod test_text_section;
 mod test_time;

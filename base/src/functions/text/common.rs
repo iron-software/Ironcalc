@@ -9,7 +9,8 @@ use crate::{
         types::CellReferenceIndex,
     },
     formatter::format::{
-        format_number_with_date_system, parse_formatted_number_with_date_system, text_function_code,
+        format_number_with_date_system, format_text, parse_formatted_number_with_date_system,
+        text_function_code,
     },
     functions::{
         text::util::{substitute, text_after, text_before, Case},
@@ -309,9 +310,10 @@ impl<'a> Model<'a> {
                             ArrayNode::Empty => format_item(0.0),
                             ArrayNode::Boolean(b) => ArrayNode::Boolean(b),
                             // IronXL: a text that reads as a number is formatted as the number.
+                            // The text section of the code shows other text.
                             ArrayNode::String(s) => match self.cast_number(&s) {
                                 Some(f) if f.is_finite() => format_item(f),
-                                _ => ArrayNode::String(s),
+                                _ => ArrayNode::String(format_text(&s, &format_code).unwrap_or(s)),
                             },
                             e @ ArrayNode::Error(_) => e,
                         };
@@ -325,10 +327,18 @@ impl<'a> Model<'a> {
                 let value = match other {
                     CalcResult::Number(f) => f,
                     // IronXL: a text that reads as a number is formatted as the number, such as
-                    // TEXT("12:00:00.25","h:mm:ss.000"). Other text stays unchanged.
+                    // TEXT("12:00:00.25","h:mm:ss.000"). The text section of the code shows other
+                    // text, such as TEXT("abc","0;0;0;""t:""@"). Without a text section, or with an
+                    // error as the code, the text stays unchanged, as before.
                     CalcResult::String(s) => match self.cast_number(&s) {
                         Some(f) if f.is_finite() => f,
-                        _ => return CalcResult::String(s),
+                        _ => {
+                            let text = match self.get_string(&args[1], cell) {
+                                Ok(code) => format_text(&s, &text_function_code(&code)),
+                                Err(_) => None,
+                            };
+                            return CalcResult::String(text.unwrap_or(s));
+                        }
                     },
                     CalcResult::Boolean(b) => return CalcResult::Boolean(b),
                     error @ CalcResult::Error { .. } => return error,
