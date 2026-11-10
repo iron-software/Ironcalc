@@ -44,13 +44,39 @@ fn size_error(cell: CellReferenceIndex) -> CalcResult {
 }
 
 impl<'a> Model<'a> {
+    /// COUNTIF(range, criteria). IronXL: a range or an array criterion gives one count for each
+    /// criterion, in the shape of the criteria, as SUMIF does. A scalar criterion gives one count.
     pub(crate) fn fn_countif(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
-        if args.len() == 2 {
-            let arguments = vec![args[0].clone(), args[1].clone()];
-            self.fn_countifs(&arguments, cell)
-        } else {
-            CalcResult::new_args_number_error(cell)
+        if args.len() != 2 {
+            return CalcResult::new_args_number_error(cell);
         }
+        let criteria_grid = match self.criteria_grid(&args[1], cell) {
+            Ok(Some(grid)) => grid,
+            Ok(None) => return self.fn_countifs(args, cell),
+            Err(error) => return error,
+        };
+        // An error of the range is the result for every criterion, so it is the whole result.
+        let range = match self.node_to_range(&args[0], cell) {
+            Ok(range) => range,
+            Err(error) => return error,
+        };
+        let mut output: Vec<Vec<ArrayNode>> = Vec::with_capacity(criteria_grid.len());
+        for criteria_row in &criteria_grid {
+            let mut out_row: Vec<ArrayNode> = Vec::with_capacity(criteria_row.len());
+            for criterion in criteria_row {
+                let fn_criteria = [build_criteria_with_date_system(
+                    criterion,
+                    self.locale,
+                    self.date_system,
+                )];
+                match self.count_ifs(std::slice::from_ref(&range), &fn_criteria, cell) {
+                    Ok(total) => out_row.push(ArrayNode::Number(total)),
+                    Err(error) => return error,
+                }
+            }
+            output.push(out_row);
+        }
+        CalcResult::Array(output)
     }
 
     /// AVERAGEIF(criteria_range, criteria, [average_range])
@@ -115,7 +141,22 @@ impl<'a> Model<'a> {
                 self.date_system,
             ));
         }
+        match self.count_ifs(ranges, &fn_criteria, cell) {
+            Ok(total) => CalcResult::Number(total),
+            Err(error) => error,
+        }
+    }
 
+    /// Counts the cells of the first range where the cell of each range at the same offset meets
+    /// its criterion. `ranges` and `fn_criteria` are parallel. IronXL: shared by COUNTIFS and the
+    /// array criteria path of COUNTIF.
+    fn count_ifs(
+        &mut self,
+        ranges: &[Range],
+        fn_criteria: &[Criterion<'_>],
+        cell: CellReferenceIndex,
+    ) -> Result<f64, CalcResult> {
+        let case_count = ranges.len();
         let mut total = 0.0;
         let first_range = &ranges[0];
         let left_row = first_range.left.row;
@@ -131,11 +172,11 @@ impl<'a> Model<'a> {
             let dimension = match self.workbook.worksheet(range.left.sheet) {
                 Ok(s) => s.dimension(),
                 Err(_) => {
-                    return CalcResult::new_error(
+                    return Err(CalcResult::new_error(
                         Error::ERROR,
                         cell,
                         format!("Invalid worksheet index: '{}'", range.left.sheet),
-                    )
+                    ))
                 }
             };
             max_row = max_row.max(dimension.max_row);
@@ -199,7 +240,7 @@ impl<'a> Model<'a> {
                 }
             }
         }
-        CalcResult::Number(total)
+        Ok(total)
     }
 
     /// Applies `apply` to each matching value of SUMIFS, AVERAGEIFS, MINIFS, or MAXIFS.
@@ -366,6 +407,50 @@ impl<'a> Model<'a> {
         Ok(())
     }
 
+    /// Collects a range or an array criteria argument into a 2-D grid of scalar criteria, one for
+    /// each cell or element. A scalar criterion gives `None`. IronXL: shared by SUMIF and COUNTIF.
+    fn criteria_grid(
+        &mut self,
+        criteria: &Node,
+        cell: CellReferenceIndex,
+    ) -> Result<Option<Vec<Vec<CalcResult>>>, CalcResult> {
+        match self.evaluate_node_in_context(criteria, cell) {
+            CalcResult::Range { left, right } => {
+                if left.sheet != right.sheet {
+                    return Err(CalcResult::new_error(
+                        Error::VALUE,
+                        cell,
+                        "Ranges are in different sheets".to_string(),
+                    ));
+                }
+                let mut grid = Vec::new();
+                for r in left.row..=right.row {
+                    let mut row = Vec::new();
+                    for c in left.column..=right.column {
+                        row.push(self.evaluate_cell(CellReferenceIndex {
+                            sheet: left.sheet,
+                            row: r,
+                            column: c,
+                        }));
+                    }
+                    grid.push(row);
+                }
+                Ok(Some(grid))
+            }
+            CalcResult::Array(array) => Ok(Some(
+                array
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|node| array_node_to_calc_result(node, cell))
+                            .collect()
+                    })
+                    .collect(),
+            )),
+            _ => Ok(None),
+        }
+    }
+
     /// Evaluates `node` and requires it to be a single-sheet range.
     fn node_to_range(
         &mut self,
@@ -404,46 +489,15 @@ impl<'a> Model<'a> {
         sum_range: &Node,
         cell: CellReferenceIndex,
     ) -> CalcResult {
-        // Collect the criteria into a 2-D grid of scalar values. A scalar
-        // criterion takes the ordinary (non-spilling) SUMIFS path.
-        let criteria_grid: Vec<Vec<CalcResult>> = match self
-            .evaluate_node_in_context(criteria, cell)
-        {
-            CalcResult::Range { left, right } => {
-                if left.sheet != right.sheet {
-                    return CalcResult::new_error(
-                        Error::VALUE,
-                        cell,
-                        "Ranges are in different sheets".to_string(),
-                    );
-                }
-                let mut grid = Vec::new();
-                for r in left.row..=right.row {
-                    let mut row = Vec::new();
-                    for c in left.column..=right.column {
-                        row.push(self.evaluate_cell(CellReferenceIndex {
-                            sheet: left.sheet,
-                            row: r,
-                            column: c,
-                        }));
-                    }
-                    grid.push(row);
-                }
-                grid
-            }
-            CalcResult::Array(array) => array
-                .iter()
-                .map(|row| {
-                    row.iter()
-                        .map(|node| array_node_to_calc_result(node, cell))
-                        .collect()
-                })
-                .collect(),
-            _ => {
+        // A scalar criterion takes the ordinary (non-spilling) SUMIFS path.
+        let criteria_grid = match self.criteria_grid(criteria, cell) {
+            Ok(Some(grid)) => grid,
+            Ok(None) => {
                 // Single criterion: delegate to SUMIFS, which returns a scalar.
                 let arguments = vec![sum_range.clone(), criteria_range.clone(), criteria.clone()];
                 return self.sum_ifs(&arguments, cell, false);
             }
+            Err(error) => return error,
         };
 
         // Range/array criteria: resolve the ranges once, then compute one sum
