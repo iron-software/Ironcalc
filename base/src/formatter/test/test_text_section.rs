@@ -20,6 +20,11 @@ fn format_text_shows_the_text_section() {
         ("0;0;0;[Red]@", "abc"),
         ("[$\u{20ac}-409]@", "\u{20ac}abc"),
         ("0;0;0;\"none\"", "none"),
+        ("0;0;0;", ""),
+        (";;;", ""),
+        ("0;0;0;\"\"", ""),
+        ("0;0;\";\";", ""),
+        ("0;0;0\\;;", ""),
     ];
     for (code, expected) in cases {
         assert_eq!(
@@ -42,6 +47,9 @@ fn format_text_gives_none_without_a_text_section() {
         "0;0;0;General",
         "0;0;0;[Bad]@",
         "0;0;0;@;@",
+        "0;0;",
+        "0;0;\";\"",
+        "0;0;0\\;",
         "",
     ];
     for code in cases {

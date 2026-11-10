@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
 // IronXL: TEXT shows a text that does not read as a number with the text section of the code,
-// as Excel does. Without a text section, the text stays unchanged.
+// as Excel does. Without a text section, the text stays unchanged. An error as the code gives the
+// error.
 
 use crate::test::util::new_empty_model;
 
@@ -29,6 +30,9 @@ fn text_shows_a_text_with_the_text_section() {
         ("=TEXT(\"abc\",\"\"\"t:\"\"@\")", "t:abc"),
         ("=TEXT(\"abc\",\"@\")", "abc"),
         ("=TEXT(Z1,\"0;0;0;\"\"t:\"\"@\")", "t:abc"),
+        ("=TEXT(\"abc\",\"0;0;0;\")&\"|\"", "|"),
+        ("=TEXT(\"abc\",\";;;\")&\"|\"", "|"),
+        ("=TEXT(Z1,\";;;\")&\"|\"", "|"),
     ]);
 }
 
@@ -44,6 +48,8 @@ fn text_shows_each_text_item_of_an_array_with_the_text_section() {
             "1",
         ),
         ("=INDEX(TEXT({\"abc\"},\"0.00\"),1,1)", "abc"),
+        ("=INDEX(TEXT({\"abc\",\"1\"},\"0;0;0;\"),1,1)&\"|\"", "|"),
+        ("=INDEX(TEXT({\"abc\",\"1\"},\"0;0;0;\"),1,2)", "1"),
     ]);
 }
 
@@ -53,10 +59,20 @@ fn text_keeps_a_text_without_a_text_section() {
         ("=TEXT(\"abc\",\"0\")", "abc"),
         ("=TEXT(\"abc\",\"0;0\")", "abc"),
         ("=TEXT(\"abc\",\"0;0;0;0@\")", "abc"),
-        ("=TEXT(\"abc\",NA())", "abc"),
         ("=TEXT(\"12\",\"0;0;0;\"\"t:\"\"@\")", "12"),
         ("=TEXT(\"12\",\"0.00\")", "12.00"),
         ("=TEXT(\"2020-01-15\",\"m/d/yyyy\")", "1/15/2020"),
         ("=TEXT(\"1900-01-15\",\"m/d/yyyy\")", "1/15/1900"),
+        ("=TEXT(\"12\",\";;;\")&\"|\"", "|"),
+    ]);
+}
+
+#[test]
+fn text_gives_the_error_of_the_code() {
+    assert_results(&[
+        ("=TEXT(\"abc\",NA())", "#N/A"),
+        ("=TEXT(Z1,1/0)", "#DIV/0!"),
+        ("=INDEX(TEXT({\"abc\"},NA()),1,1)", "#N/A"),
+        ("=TEXT(\"12\",NA())", "#N/A"),
     ]);
 }
