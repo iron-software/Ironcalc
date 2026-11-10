@@ -716,7 +716,13 @@ pub fn format_number_with_date_system(
             let group_separator = symbols.group.to_owned();
             let decimal_separator = symbols.decimal.to_owned();
             // There probably are better ways to check if a number at a given precision is negative :/
-            let is_negative = value < -(10.0_f64.powf(-(p.precision as f64)));
+            // IronXL: a scientific mantissa is not zero for a value that is not zero, so it keeps
+            // the sign of the value, as Excel shows -1E+3 for -1234 with 0E+0.
+            let is_negative = if p.is_scientific {
+                value < 0.0
+            } else {
+                value < -(10.0_f64.powf(-(p.precision as f64)))
+            };
             let mut needs_period = false;
 
             for token in tokens {

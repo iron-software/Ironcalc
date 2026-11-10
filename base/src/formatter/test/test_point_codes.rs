@@ -86,6 +86,24 @@ fn scientific_exponent_is_a_multiple_of_the_whole_digits() {
     ]);
 }
 
+// IronXL: a negative value keeps its sign when its mantissa rounds to one unit of the last digit,
+// as Excel shows -1E+3 for -1234 with 0E+0.
+#[test]
+fn scientific_mantissa_keeps_the_sign_of_the_value() {
+    assert_texts(&[
+        (-1234.0, "0E+0", "-1E+3"),
+        (-12.0, "0E+0", "-1E+1"),
+        (-1.2, "0E+0", "-1E+0"),
+        (-0.0012, "0E+0", "-1E-3"),
+        (-1100.0, "0.E+0", "-1.E+3"),
+        (-1234.0, ".0E+0", "-.1E+4"),
+        (-0.1, ".0E+0", "-.1E+0"),
+        (-1234.0, ".00E+00", "-.12E+04"),
+        (-1001.0, "0.00E+00", "-1.00E+03"),
+        (-0.0, "0E+0", "0E+0"),
+    ]);
+}
+
 #[test]
 fn codes_with_digits_on_each_side_of_the_point_do_not_change() {
     assert_texts(&[
