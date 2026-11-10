@@ -12,6 +12,7 @@ mod test_countif_array_criteria;
 mod test_countifs_whole_sheet_and_sheets;
 mod test_criteria;
 mod test_criteria_not_equal_text;
+mod test_criteria_time_percent;
 mod test_criteria_white_space;
 mod test_database;
 mod test_date_1904;

@@ -1163,6 +1163,31 @@ pub(crate) fn parse_date_time(
     ))
 }
 
+/// IronXL: reads a percent text, a number of `locale` then `%`, such as `50%` or `12.5 %`. Gives the number
+/// divided by 100, and its format.
+///
+/// The text-to-number cast and the criteria grammar use this parser.
+pub(crate) fn parse_percent(value: &str, locale: &Locale) -> Result<(f64, String), String> {
+    let number = value
+        .trim()
+        .strip_suffix('%')
+        .ok_or_else(|| "Not a percent".to_string())?;
+    let symbols = &locale.numbers.symbols;
+    let decimal_separator = symbols.decimal.chars().next().unwrap_or('.');
+    let group_separator = symbols.group.chars().next().unwrap_or(',');
+    let (f, options) = parse_number(number.trim(), decimal_separator, group_separator)?;
+    let format = if options.is_scientific {
+        "0.00E+00"
+    } else if options.decimal_digits > 0 {
+        // We ignore the separator. Percentage format with decimals
+        "#,##0.00%"
+    } else {
+        // Percentage format standard
+        "#,##0%"
+    };
+    Ok((f / 100.0, format.to_string()))
+}
+
 /// Parses a formatted number, returning the numeric value together with the format
 /// Uses heuristics to guess the format string
 /// "$ 123,345.678" => (123345.678, "$#,##0.00")
@@ -1193,18 +1218,8 @@ pub(crate) fn parse_formatted_number_with_date_system(
     let group_separator = symbols.group.chars().next().unwrap_or(',');
 
     // Check if it is a percentage
-    if let Some(p) = value.strip_suffix('%') {
-        let (f, options) = parse_number(p.trim(), decimal_separator, group_separator)?;
-        if options.is_scientific {
-            return Ok((f / 100.0, Some(scientific_format.to_string())));
-        }
-        // We ignore the separator
-        if options.decimal_digits > 0 {
-            // Percentage format with decimals
-            return Ok((f / 100.0, Some("#,##0.00%".to_string())));
-        }
-        // Percentage format standard
-        return Ok((f / 100.0, Some("#,##0%".to_string())));
+    if value.ends_with('%') {
+        return parse_percent(value, locale).map(|(f, format)| (f, Some(format)));
     }
 
     // check if it is a currency in currencies

@@ -33,8 +33,10 @@ pub struct Criterion<'a> {
 
 impl<'a> Criterion<'a> {
     /// The criterion of `criteria`. Every text is a criterion, as in Excel: a text that does not read as a number,
-    /// a date, a Boolean, an error, or a wildcard pattern compares as text. `locale` and `date_system` read a date,
-    /// such as `"> 1/1/2024"`, as the formulas of a model with the same settings do.
+    /// a date, a time, a date and time, a percent, a Boolean, an error, or a wildcard pattern compares as text.
+    /// A time, such as `">=12:00"`, compares as its fraction of a day, and a percent, such as `"50%"`, as the number
+    /// divided by 100. `locale` and `date_system` read a date, such as `"> 1/1/2024"`, as the formulas of a model
+    /// with the same settings do.
     pub fn new(criteria: &'a str, locale: &'a Locale, date_system: DateSystem) -> Self {
         Self {
             test: build_text_criteria(criteria, locale, date_system),
