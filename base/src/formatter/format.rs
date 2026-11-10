@@ -4,6 +4,7 @@ use crate::{locale::Locale, number_format::to_precision};
 
 use super::{
     dates::{date_of_serial, date_to_serial_number, weekday_of_serial, DateSystem},
+    lexer::{Lexer, Token},
     parser::{ParsePart, Parser, TextToken},
 };
 
@@ -162,14 +163,16 @@ pub fn text_function_code(code: &str) -> String {
 /// IronXL: the text that the code `format` shows for the text `value`, as Excel shows it. The text
 /// section is the fourth section, or the only section when it holds `@`. Quoted text and literals
 /// show as they are, `@` shows `value`, and `_x` and `*x` show one space, as for a number. A color
-/// shows nothing. None when the code has no text section, or the section holds a token for a
-/// number or a date, such as `0`.
+/// shows nothing, and an empty fourth section shows an empty text. None when the code has no text
+/// section, or the section holds a token for a number or a date, such as `0`.
 pub fn format_text(value: &str, format: &str) -> Option<String> {
     let mut parser = Parser::new(format);
     parser.parse();
     let part = match parser.parts.as_slice() {
         [part] => part,
         [_, _, _, part] => part,
+        // The parser keeps no part after a final `;`, as in `0;0;0;` and `;;;`.
+        [_, _, _] if section_count(format) == 4 => return Some(String::new()),
         _ => return None,
     };
     let ParsePart::Number(p) = part else {
@@ -189,6 +192,20 @@ pub fn format_text(value: &str, format: &str) -> Option<String> {
         }
     }
     Some(text)
+}
+
+// IronXL: the number of sections of the code `format`: one more than the count of the `;` that
+// are not quoted or escaped.
+fn section_count(format: &str) -> usize {
+    let mut lexer = Lexer::new(format);
+    let mut count = 1;
+    loop {
+        match lexer.next_token() {
+            Token::EOF => return count,
+            Token::Separator => count += 1,
+            _ => {}
+        }
+    }
 }
 
 pub fn format_number(value_original: f64, format: &str, locale: &Locale) -> Formatted {

@@ -328,16 +328,17 @@ impl<'a> Model<'a> {
                     CalcResult::Number(f) => f,
                     // IronXL: a text that reads as a number is formatted as the number, such as
                     // TEXT("12:00:00.25","h:mm:ss.000"). The text section of the code shows other
-                    // text, such as TEXT("abc","0;0;0;""t:""@"). Without a text section, or with an
-                    // error as the code, the text stays unchanged, as before.
+                    // text, such as TEXT("abc","0;0;0;""t:""@"). Without a text section, the text
+                    // stays unchanged. An error as the code gives the error, as for a number.
                     CalcResult::String(s) => match self.cast_number(&s) {
                         Some(f) if f.is_finite() => f,
                         _ => {
-                            let text = match self.get_string(&args[1], cell) {
-                                Ok(code) => format_text(&s, &text_function_code(&code)),
-                                Err(_) => None,
+                            return match self.get_string(&args[1], cell) {
+                                Ok(code) => CalcResult::String(
+                                    format_text(&s, &text_function_code(&code)).unwrap_or(s),
+                                ),
+                                Err(e) => e,
                             };
-                            return CalcResult::String(text.unwrap_or(s));
                         }
                     },
                     CalcResult::Boolean(b) => return CalcResult::Boolean(b),
