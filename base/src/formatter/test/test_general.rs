@@ -2,7 +2,10 @@
 #![allow(clippy::expect_used)]
 
 use crate::{
-    formatter::format::format_number,
+    formatter::{
+        dates::DateSystem,
+        format::{format_number, format_text_number},
+    },
     locale::{get_locale, Locale},
 };
 
@@ -299,4 +302,19 @@ fn test_date() {
 fn test_german_locale() {
     let locale = get_locale("de").expect("");
     assert_eq!(format_number(1234.56, "General", locale).text, "1234,56");
+}
+
+#[test]
+fn test_general_width() {
+    // IronXL: TEXT shows at most 11 characters with General.
+    let text = |value: f64, locale: &str| {
+        let locale = get_locale(locale).expect("");
+        format_text_number(value, "General", locale, DateSystem::default()).text
+    };
+    assert_eq!(text(1234567890.5, "en"), "1234567891");
+    assert_eq!(text(12.123456789123, "en"), "12.12345679");
+    assert_eq!(text(999999999999.0, "en"), "1E+12");
+    assert_eq!(text(1.0e-9, "en"), "1E-09");
+    assert_eq!(text(12.123456789123, "de"), "12,12345679");
+    assert_eq!(text(123456789012.0, "de"), "1,23457E+11");
 }

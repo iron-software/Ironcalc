@@ -116,6 +116,69 @@ fn scientific(value: f64, whole: i32, decimals: i32) -> (f64, i32) {
     (mantissa.copysign(value), exponent)
 }
 
+/// IronXL: the General text of `value` for `TEXT`, as Excel gives it, with at most 11 characters
+/// without the sign. A value from 1E-8 to below 1E+11 shows the most decimals that fit: 9 below
+/// 1, so 12.123456789123 shows 12.12345679 and 1234567890.5 shows 1234567891. Each other value,
+/// and a value that rounds to 12 whole digits, shows a mantissa with at most 5 decimals and the
+/// exponent, so 123456789012 shows 1.23457E+11 and 999999999999 shows 1E+12. The rounding is half
+/// away from zero, and the trailing zeros go.
+fn text_general(value: f64) -> String {
+    let size = value.abs();
+    if size == 0.0 {
+        return "0".to_string();
+    }
+    if (1.0e-8..1.0e+11).contains(&size) {
+        let whole = if size < 1.0 {
+            1
+        } else {
+            format!("{:.0}", size.trunc()).len() as i32
+        };
+        let decimals = (10 - whole).max(0);
+        let fixed = rounded(value, decimals);
+        if fixed.abs() < 1.0e+11 {
+            return without_trailing_zeros(format!("{fixed:.0$}", decimals as usize));
+        }
+    }
+    let (mantissa, exponent) = scientific(value, 1, 5);
+    let sign = if exponent < 0 { '-' } else { '+' };
+    format!(
+        "{}E{sign}{:02}",
+        without_trailing_zeros(format!("{mantissa:.5}")),
+        exponent.abs()
+    )
+}
+
+/// IronXL: the General text of `value` for a cell, as the engine gave it before `text_general`.
+fn cell_general(value: f64) -> String {
+    let value_abs = value.abs();
+    if (1.0e-8..1.0e+11).contains(&value_abs) {
+        let text = format!("{value:.9}");
+        return text.trim_end_matches('0').trim_end_matches('.').to_string();
+    }
+    if value_abs == 0.0 {
+        return "0".to_string();
+    }
+    let exponent = value_abs.log10().floor();
+    let mantissa = value / 10.0_f64.powf(exponent);
+    let sign = if exponent < 0.0 { '-' } else { '+' };
+    let s = format!("{mantissa:.5}");
+    format!(
+        "{}E{}{:02}",
+        s.trim_end_matches('0').trim_end_matches('.'),
+        sign,
+        exponent.abs()
+    )
+}
+
+/// IronXL: `text` without the zeros at the end of its decimals, and without a point at the end.
+fn without_trailing_zeros(text: String) -> String {
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        text
+    }
+}
+
 /// Return true if we need to add a separator in position digit_index
 /// It normally happens if if digit_index -1 is 3, 6, 9,... digit_index ≡ 1 mod 3
 fn use_group_separator(use_thousands: bool, digit_index: i32, group_sizes: &str) -> bool {
@@ -260,6 +323,28 @@ pub fn format_number_with_date_system(
     locale: &Locale,
     date_system: DateSystem,
 ) -> Formatted {
+    format_number_with_general(value_original, format, locale, date_system, cell_general)
+}
+
+/// IronXL: formats a number for `TEXT` like `format_number_with_date_system`. A General section
+/// gives the `TEXT` text of Excel, with at most 11 characters (`text_general`).
+pub fn format_text_number(
+    value: f64,
+    format: &str,
+    locale: &Locale,
+    date_system: DateSystem,
+) -> Formatted {
+    format_number_with_general(value, format, locale, date_system, text_general)
+}
+
+/// IronXL: formats a number; `general` gives the text of a General section.
+fn format_number_with_general(
+    value_original: f64,
+    format: &str,
+    locale: &Locale,
+    date_system: DateSystem,
+    general: fn(f64) -> String,
+) -> Formatted {
     let mut parser = Parser::new(format);
     parser.parse();
     let parts = parser.parts;
@@ -333,46 +418,14 @@ pub fn format_number_with_date_system(
             error: Some("Problem parsing format string".to_owned()),
         },
         ParsePart::General(..) => {
-            // FIXME: This is "General formatting"
-            // We should have different codepaths for general formatting and errors
-            let value_abs = value.abs();
-            if (1.0e-8..1.0e+11).contains(&value_abs) {
-                let mut text = format!("{value:.9}");
-                text = text.trim_end_matches('0').trim_end_matches('.').to_string();
-                if locale.numbers.symbols.decimal != "." {
-                    text = text.replace('.', &locale.numbers.symbols.decimal.to_string());
-                }
-                Formatted {
-                    text,
-                    color: None,
-                    error: None,
-                }
-            } else {
-                if value_abs == 0.0 {
-                    return Formatted {
-                        text: "0".to_string(),
-                        color: None,
-                        error: None,
-                    };
-                }
-                let exponent = value_abs.log10().floor();
-                value /= 10.0_f64.powf(exponent);
-                let sign = if exponent < 0.0 { '-' } else { '+' };
-                let s = format!("{value:.5}");
-                let mut text = format!(
-                    "{}E{}{:02}",
-                    s.trim_end_matches('0').trim_end_matches('.'),
-                    sign,
-                    exponent.abs()
-                );
-                if locale.numbers.symbols.decimal != "." {
-                    text = text.replace('.', &locale.numbers.symbols.decimal.to_string());
-                }
-                Formatted {
-                    text,
-                    color: None,
-                    error: None,
-                }
+            let mut text = general(value);
+            if locale.numbers.symbols.decimal != "." {
+                text = text.replace('.', &locale.numbers.symbols.decimal.to_string());
+            }
+            Formatted {
+                text,
+                color: None,
+                error: None,
             }
         }
         ParsePart::Date(p) => {

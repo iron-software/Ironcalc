@@ -9,7 +9,7 @@ use crate::{
         types::CellReferenceIndex,
     },
     formatter::format::{
-        format_number_with_date_system, format_text, parse_formatted_number_with_date_system,
+        format_text, format_text_number, parse_formatted_number_with_date_system,
         text_function_code,
     },
     functions::{
@@ -294,7 +294,7 @@ impl<'a> Model<'a> {
                 let locale = self.locale;
                 let date_system = self.date_system;
                 let format_item = |f: f64| {
-                    let d = format_number_with_date_system(f, &format_code, locale, date_system);
+                    let d = format_text_number(f, &format_code, locale, date_system);
                     if d.error.is_some() {
                         ArrayNode::Error(Error::VALUE)
                     } else {
@@ -358,12 +358,7 @@ impl<'a> Model<'a> {
                     Ok(s) => text_function_code(&s),
                     Err(s) => return s,
                 };
-                let d = format_number_with_date_system(
-                    value,
-                    &format_code,
-                    self.locale,
-                    self.date_system,
-                );
+                let d = format_text_number(value, &format_code, self.locale, self.date_system);
                 if let Some(_e) = d.error {
                     return CalcResult::Error {
                         error: Error::VALUE,
