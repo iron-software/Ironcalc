@@ -947,15 +947,18 @@ fn parse_month(month_str: &str, locale: &Locale) -> Result<(u32, String), String
         }
     }
 
-    let month_names_short = &locale.dates.months_short;
-    let month_names_long = &locale.dates.months;
-    if let Some(m) = month_names_short.iter().position(|r| r == month_str) {
-        return Ok((m as u32 + 1, "mmm".to_string()));
+    parse_month_name(month_str, locale).ok_or_else(|| "Not a valid month".to_string())
+}
+
+/// IronXL: reads a short or a full month name of `locale` in any letter case, such as `jan` or
+/// `JANUARY`. Gives the month and its format, `mmm` or `mmmm`.
+fn parse_month_name(month_str: &str, locale: &Locale) -> Option<(u32, String)> {
+    let month_str = month_str.to_lowercase();
+    let position = |names: &[String]| names.iter().position(|r| r.to_lowercase() == month_str);
+    if let Some(m) = position(&locale.dates.months_short) {
+        return Some((m as u32 + 1, "mmm".to_string()));
     }
-    if let Some(m) = month_names_long.iter().position(|r| r == month_str) {
-        return Ok((m as u32 + 1, "mmmm".to_string()));
-    }
-    Err("Not a valid month".to_string())
+    position(&locale.dates.months).map(|m| (m as u32 + 1, "mmmm".to_string()))
 }
 
 fn parse_year(year_str: &str) -> Result<(i32, String), String> {
@@ -1003,11 +1006,17 @@ fn parse_year(year_str: &str) -> Result<(i32, String), String> {
 // NOTE 1: The separator has to be the same
 // NOTE 2: In some engines "2/3" is implemented ad "2/March of the present year"
 // NOTE 3: I did not implement the "short date"
+//
+// IronXL: the date text can have white space before and after it. A month name in the first or the
+// second part is the month, and the other part is the day, so "2-Jan-2020" and "Jan-2-2020" both
+// read. Number parts keep the order of the locale. A text without a separator reads as a long date
+// (see `parse_long_date`).
 pub(crate) fn parse_date(
     value: &str,
     locale: &Locale,
     date_system: DateSystem,
 ) -> Result<(i32, String), String> {
+    let value = value.trim();
     let separator = if value.contains('/') {
         '/'
     } else if value.contains('-') {
@@ -1015,14 +1024,14 @@ pub(crate) fn parse_date(
     } else if value.contains('.') {
         '.'
     } else {
-        return Err("Not a valid date".to_string());
+        return parse_long_date(value, locale, date_system);
     };
 
     let parts: Vec<&str> = value.split(separator).collect();
     let mut is_iso_date = false;
     let mut day_first = true;
     let (day_str, month_str, year_str) = if parts.len() == 3 {
-        if parts[0].len() == 4 {
+        if parts[0].len() == 4 && parts[0].bytes().all(|b| b.is_ascii_digit()) {
             // ISO date  yyyy-mm-dd
             if !parts[1].chars().all(char::is_numeric) {
                 return Err("Not a valid date".to_string());
@@ -1032,6 +1041,11 @@ pub(crate) fn parse_date(
             }
             is_iso_date = true;
             (parts[2], parts[1], parts[0])
+        } else if parse_month_name(parts[0], locale).is_some() {
+            day_first = false;
+            (parts[1], parts[0], parts[2])
+        } else if parse_month_name(parts[1], locale).is_some() {
+            (parts[0], parts[1], parts[2])
         } else {
             //  localized date dd-mm-yyyy or mm-dd-yyyy
             // TODO: A bit hacky, but works for now
@@ -1068,6 +1082,54 @@ pub(crate) fn parse_date(
             format!("{day_format}{separator}{month_format}{separator}{year_format}"),
         ))
     }
+}
+
+/// IronXL: reads a long date text with a month name, as Excel does, such as `Jan 2, 2020` or
+/// `2 January 2020`. Gives the date serial number and the date format.
+///
+/// The grammar is:
+///
+/// long_date -> name_month space day ("," [space] | space) year | day space name_month space year
+/// space -> one or more white space characters
+fn parse_long_date(
+    value: &str,
+    locale: &Locale,
+    date_system: DateSystem,
+) -> Result<(i32, String), String> {
+    let error = || "Not a valid date".to_string();
+    let (first, rest) = value.split_once(char::is_whitespace).ok_or_else(error)?;
+    let rest = rest.trim_start();
+    // The separator after the day: None for a day first, else a comma or a space.
+    let (day_str, month, month_format, year_str, day_separator) =
+        if let Some((month, month_format)) = parse_month_name(first, locale) {
+            let day_end = rest
+                .find(|c: char| c == ',' || c.is_whitespace())
+                .ok_or_else(error)?;
+            let (day_str, tail) = rest.split_at(day_end);
+            match tail.strip_prefix(',') {
+                Some(year_str) => (
+                    day_str,
+                    month,
+                    month_format,
+                    year_str.trim_start(),
+                    Some(","),
+                ),
+                None => (day_str, month, month_format, tail.trim_start(), Some("")),
+            }
+        } else {
+            let (month_str, year_str) = rest.split_once(char::is_whitespace).ok_or_else(error)?;
+            let (month, month_format) = parse_month_name(month_str, locale).ok_or_else(error)?;
+            (first, month, month_format, year_str.trim_start(), None)
+        };
+    let (day, day_format) = parse_day(day_str)?;
+    let (year, year_format) = parse_year(year_str)?;
+    let serial_number =
+        date_to_serial_number(day, month, year, date_system).map_err(|_| error())?;
+    let format = match day_separator {
+        Some(day_separator) => format!("{month_format} {day_format}{day_separator} {year_format}"),
+        None => format!("{day_format} {month_format} {year_format}"),
+    };
+    Ok((serial_number, format))
 }
 
 /// IronXL: the value of a time component of 1 or 2 digits from 0 to `maximum`.
@@ -1147,26 +1209,34 @@ pub(crate) fn parse_time(value: &str) -> Result<(f64, String), String> {
 }
 
 /// IronXL: reads a date text, then white space, then a time text, as Excel does, such as
-/// `1/2/2020 12:00`. Gives the date serial number plus the fraction of the day, and the date
-/// format then the time format.
+/// `1/2/2020 12:00` or `Jan 2, 2020 6:30 PM`. Gives the date serial number plus the fraction of
+/// the day, and the date format then the time format.
 ///
-/// `parse_date` reads the date part and `parse_time` reads the time part.
+/// The time part is the last word, or the last two words, such as `6:30 PM`. `parse_date` reads
+/// the date part and `parse_time` reads the time part.
 pub(crate) fn parse_date_time(
     value: &str,
     locale: &Locale,
     date_system: DateSystem,
 ) -> Result<(f64, String), String> {
-    let error = || "Not a valid date and time".to_string();
-    let (date, time) = value
-        .trim()
-        .split_once(char::is_whitespace)
-        .ok_or_else(error)?;
-    let (serial_number, date_format) = parse_date(date, locale, date_system)?;
-    let (fraction, time_format) = parse_time(time)?;
-    Ok((
-        serial_number as f64 + fraction,
-        format!("{date_format} {time_format}"),
-    ))
+    let value = value.trim();
+    let mut date = value;
+    for _ in 0..2 {
+        let Some(split) = date.trim_end().rfind(char::is_whitespace) else {
+            break;
+        };
+        date = &value[..split];
+        if let (Ok((serial_number, date_format)), Ok((fraction, time_format))) = (
+            parse_date(date, locale, date_system),
+            parse_time(&value[split..]),
+        ) {
+            return Ok((
+                serial_number as f64 + fraction,
+                format!("{date_format} {time_format}"),
+            ));
+        }
+    }
+    Err("Not a valid date and time".to_string())
 }
 
 /// IronXL: reads a percent text, a number of `locale` then `%`, such as `50%` or `12.5 %`. Gives the number
@@ -1262,8 +1332,8 @@ pub(crate) fn parse_formatted_number_with_date_system(
         }
     }
 
-    // check if it is a date. NOTE: we don't trim the original here
-    if let Ok((serial_number, format)) = parse_date(original, locale, date_system) {
+    // check if it is a date. IronXL: read the date from the trimmed value, as Excel does
+    if let Ok((serial_number, format)) = parse_date(value, locale, date_system) {
         return Ok((serial_number as f64, Some(format)));
     }
 

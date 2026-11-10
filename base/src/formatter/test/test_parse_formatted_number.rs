@@ -4,7 +4,8 @@ use crate::{
     formatter::{
         dates::DateSystem,
         format::{
-            parse_date_time, parse_formatted_number, parse_formatted_number_with_date_system,
+            parse_date, parse_date_time, parse_formatted_number,
+            parse_formatted_number_with_date_system,
         },
     },
     locale::{get_default_locale, get_locale},
@@ -444,4 +445,167 @@ fn date_and_time_in_the_1904_date_system() {
         parse_date_time("1/2/2020", locale, DateSystem::Date1900),
         Err("Not a valid date and time".to_string())
     );
+}
+
+fn ok(value: f64, format: &str) -> Result<(f64, Option<String>), String> {
+    Ok((value, Some(format.to_string())))
+}
+
+// IronXL: a date text can have white space before and after it, as in Excel.
+#[test]
+fn date_text_with_white_space() {
+    assert_eq!(parse(" 1/2/2020", &["$"]), ok(43832.0, "m/d/yyyy"));
+    assert_eq!(parse("1/2/2020 ", &["$"]), ok(43832.0, "m/d/yyyy"));
+    assert_eq!(parse(" 1/2/2020 ", &["$"]), ok(43832.0, "m/d/yyyy"));
+    assert_eq!(parse("\t1/2/2020\n", &["$"]), ok(43832.0, "m/d/yyyy"));
+    assert_eq!(parse(" 2020-01-02 ", &["$"]), ok(43832.0, "yyyy-mm-dd"));
+    assert_eq!(parse(" 2-Jan-2020 ", &["$"]), ok(43832.0, "d-mmm-yyyy"));
+    assert_eq!(
+        parse_date(" 1/2/2020 ", get_default_locale(), DateSystem::Date1900),
+        Ok((43832, "m/d/yyyy".to_string()))
+    );
+}
+
+// IronXL: a month name in the first or the second part is the month, in any letter case.
+#[test]
+fn date_text_with_a_month_name() {
+    assert_eq!(parse("2-Jan-2020", &["$"]), ok(43832.0, "d-mmm-yyyy"));
+    assert_eq!(parse("2-jan-2020", &["$"]), ok(43832.0, "d-mmm-yyyy"));
+    assert_eq!(parse("2-JAN-2020", &["$"]), ok(43832.0, "d-mmm-yyyy"));
+    assert_eq!(parse("2-January-2020", &["$"]), ok(43832.0, "d-mmmm-yyyy"));
+    assert_eq!(
+        parse("02-january-2020", &["$"]),
+        ok(43832.0, "dd-mmmm-yyyy")
+    );
+    assert_eq!(parse("2-Jan-20", &["$"]), ok(43832.0, "d-mmm-yy"));
+    assert_eq!(parse("2/Jan/2020", &["$"]), ok(43832.0, "d/mmm/yyyy"));
+    assert_eq!(parse("2.Jan.2020", &["$"]), ok(43832.0, "d.mmm.yyyy"));
+    assert_eq!(parse("Jan-2-2020", &["$"]), ok(43832.0, "mmm-d-yyyy"));
+    assert_eq!(parse("JAN-2-2020", &["$"]), ok(43832.0, "mmm-d-yyyy"));
+    // A full name of 4 letters is not the year of an ISO date.
+    assert_eq!(parse("June-2-2020", &["$"]), ok(43984.0, "mmmm-d-yyyy"));
+    // Number parts keep the order of the locale; a month name sets its own position.
+    let es = get_locale("es").unwrap();
+    assert_eq!(
+        parse_formatted_number("ENE-15-2023", &[], es),
+        ok(44941.0, "mmm-dd-yyyy")
+    );
+    assert_eq!(
+        parse_formatted_number("15-Ene-2023", &[], es),
+        ok(44941.0, "dd-mmm-yyyy")
+    );
+}
+
+// IronXL: a long date is a month name, a day, an optional comma, and a year, or a day, a month
+// name, and a year, with white space between them.
+#[test]
+fn long_date_text() {
+    assert_eq!(parse("Jan 2, 2020", &["$"]), ok(43832.0, "mmm d, yyyy"));
+    assert_eq!(
+        parse("January 2, 2020", &["$"]),
+        ok(43832.0, "mmmm d, yyyy")
+    );
+    assert_eq!(parse("Jan 2 2020", &["$"]), ok(43832.0, "mmm d yyyy"));
+    assert_eq!(parse("Jan 2,2020", &["$"]), ok(43832.0, "mmm d, yyyy"));
+    assert_eq!(
+        parse(" jan  02,  2020 ", &["$"]),
+        ok(43832.0, "mmm dd, yyyy")
+    );
+    assert_eq!(parse("Jan 2, 20", &["$"]), ok(43832.0, "mmm d, yy"));
+    assert_eq!(parse("2 Jan 2020", &["$"]), ok(43832.0, "d mmm yyyy"));
+    assert_eq!(parse("2 January 2020", &["$"]), ok(43832.0, "d mmmm yyyy"));
+    assert_eq!(parse("2\tJAN\t20", &["$"]), ok(43832.0, "d mmm yy"));
+    assert_eq!(parse("Feb 29, 2020", &["$"]), ok(43890.0, "mmm dd, yyyy"));
+}
+
+// IronXL: a date text with a month name, then white space, then a time text.
+#[test]
+fn date_text_with_a_month_name_and_a_time() {
+    assert_eq!(
+        parse("2-Jan-2020 12:00", &["$"]),
+        ok(43832.5, "d-mmm-yyyy h:mm")
+    );
+    assert_eq!(
+        parse("Jan 2, 2020 12:00", &["$"]),
+        ok(43832.5, "mmm d, yyyy h:mm")
+    );
+    assert_eq!(
+        parse(" 2 Jan 2020 6:30 PM ", &["$"]),
+        ok(43832.0 + 1_110.0 / 1_440.0, "d mmm yyyy h:mm AM/PM")
+    );
+    assert_eq!(
+        parse("Jan 2 2020  6:30   pm", &["$"]),
+        ok(43832.0 + 1_110.0 / 1_440.0, "mmm d yyyy h:mm AM/PM")
+    );
+    assert_eq!(
+        parse("January 2, 2020 12:00:00.5", &["$"]),
+        ok(43832.5 + 0.5 / 86_400.0, "mmmm d, yyyy h:mm:ss.0")
+    );
+    assert_eq!(
+        parse_date_time("Jan 2, 2020", get_default_locale(), DateSystem::Date1900),
+        Err("Not a valid date and time".to_string())
+    );
+}
+
+// IronXL: the new date texts give a serial number of the 1904 date system.
+#[test]
+fn date_text_with_a_month_name_in_the_1904_date_system() {
+    let locale = get_default_locale();
+    for text in ["2-Jan-2020", "Jan 2, 2020", " 1/2/2020 ", "2 January 2020"] {
+        assert_eq!(
+            parse_formatted_number_with_date_system(text, &["$"], locale, DateSystem::Date1904)
+                .map(|(value, _)| value),
+            Ok(42370.0),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        parse_formatted_number_with_date_system(
+            "Jan 2, 2020 12:00",
+            &["$"],
+            locale,
+            DateSystem::Date1904
+        ),
+        ok(42370.5, "mmm d, yyyy h:mm")
+    );
+    // The 1904 date system has no date before 1 January 1904.
+    assert!(parse_formatted_number_with_date_system(
+        "Dec 31, 1903",
+        &["$"],
+        locale,
+        DateSystem::Date1904
+    )
+    .is_err());
+}
+
+// IronXL: an invalid date text with a month name does not read as a number.
+#[test]
+fn date_text_with_a_month_name_errors() {
+    for text in [
+        "32-Jan-2020",
+        "2-Foo-2020",
+        "Jan-Feb-2020",
+        "2-Jan-2020x",
+        "2-Jan-202",
+        "2020-Jan-02",
+        "Jan 32, 2020",
+        "Feb 30, 2020",
+        "Jan 2, 2020 12:60",
+        "Jan 2, 2020 12:00 PM 1",
+        "Jan 2,, 2020",
+        "Jan 2 , 2020",
+        "Jan, 2 2020",
+        "Jan 2,",
+        "Jan 2",
+        "Jan",
+        "2 Jan",
+        "2 Jan, 2020",
+        "Foo 2, 2020",
+        "2 Foo 2020",
+        "1 2 2020",
+        "Jan Jan 2020",
+        "Jan 2, 2020x",
+    ] {
+        assert!(parse(text, &["$"]).is_err(), "{text}");
+    }
 }
