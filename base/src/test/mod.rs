@@ -45,6 +45,7 @@ mod test_name_range_sheet_reference;
 mod test_name_reference;
 mod test_range_operator;
 mod test_sheet_qualified_defined_names;
+mod test_sheet_reference_range_operator;
 mod test_statistical_functions;
 mod test_three_d_references;
 // FIXME: These tests are failing
