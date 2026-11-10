@@ -12,6 +12,7 @@ mod test_languages;
 mod test_let;
 mod test_locales;
 mod test_move_formula;
+mod test_operator_parentheses;
 mod test_partial_parsing;
 mod test_range_chain;
 mod test_ranges;

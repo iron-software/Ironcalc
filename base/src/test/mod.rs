@@ -44,6 +44,7 @@ mod test_long_chains;
 mod test_lookup_criteria_reference;
 mod test_name_range_sheet_reference;
 mod test_name_reference;
+mod test_operator_parentheses;
 mod test_range_operator;
 mod test_rows_columns_array;
 mod test_sheet_qualified_defined_names;
