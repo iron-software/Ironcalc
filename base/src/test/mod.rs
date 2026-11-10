@@ -37,6 +37,7 @@ mod test_fn_financial_simple;
 mod test_forecast;
 mod test_formula_defined_names;
 mod test_if_reference;
+mod test_ifs_array_criteria;
 mod test_ifs_range_size;
 mod test_index_reference;
 mod test_long_chains;

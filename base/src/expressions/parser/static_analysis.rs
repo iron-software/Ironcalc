@@ -406,6 +406,12 @@ pub(crate) fn run_static_analysis_on_node(node: &Node) -> StaticResult {
 // If all the arguments are scalars the function will return a scalar
 // If any of the arguments is a range or an array it will return an array
 fn scalar_arguments(args: &[Node]) -> StaticResult {
+    broadcast_static_result(args.iter())
+}
+
+/// The static result of a broadcast over `args`: a scalar for scalars only, else an array with the
+/// largest dimensions.
+fn broadcast_static_result<'n>(args: impl Iterator<Item = &'n Node>) -> StaticResult {
     let mut n = 0;
     let mut m = 0;
     for arg in args {
@@ -431,19 +437,12 @@ fn not_implemented(_args: &[Node]) -> StaticResult {
     StaticResult::Scalar
 }
 
-/// SUMIF and COUNTIF spill according to the shape of their criteria argument (`args[1]`); the
-/// criteria_range and sum_range arguments are consumed, not broadcast. A scalar
-/// criterion yields a scalar; a range/array criterion yields an array of the
-/// same dimensions.
-fn sumif_static_result(args: &[Node]) -> StaticResult {
-    match args.get(1) {
-        Some(criteria) => match run_static_analysis_on_node(criteria) {
-            StaticResult::Array(a, b) | StaticResult::Range(a, b) => StaticResult::Array(a, b),
-            StaticResult::Scalar => StaticResult::Scalar,
-            StaticResult::Unknown => StaticResult::Unknown,
-        },
-        None => StaticResult::Scalar,
-    }
+/// IronXL: the criteria functions spill according to the shape of their criteria arguments, the
+/// arguments from `first` with a step of two. The ranges are consumed, not broadcast. Scalar
+/// criteria give a scalar; a range or an array criterion gives an array with the largest rows and
+/// columns of the criteria.
+fn criteria_static_result(args: &[Node], first: usize) -> StaticResult {
+    broadcast_static_result(args.iter().skip(first).step_by(2))
 }
 
 fn static_analysis_offset(args: &[Node]) -> StaticResult {
@@ -593,21 +592,9 @@ fn args_signature_one_vector(arg_count: usize) -> Vec<Signature> {
     }
 }
 
-fn args_signature_sumif(arg_count: usize) -> Vec<Signature> {
-    if arg_count == 2 {
-        vec![Signature::Vector, Signature::Scalar]
-    } else if arg_count == 3 {
-        vec![Signature::Vector, Signature::Scalar, Signature::Vector]
-    } else {
-        vec![Signature::Error; arg_count]
-    }
-}
-
-/// SUMIF signature with the criteria argument as a `Vector` instead of a
-/// `Scalar`. This stops a range/array criteria from being collapsed by implicit
-/// intersection, so SUMIF can spill one sum per criterion. IronXL: COUNTIF uses it
-/// too, and spills one count per criterion. (AVERAGEIF keeps the classic
-/// [`args_signature_sumif`], intersecting range criteria.)
+/// SUMIF signature with the criteria argument as a `Vector`, not a `Scalar`. This stops a
+/// range/array criteria from being collapsed by implicit intersection, so SUMIF can spill one sum
+/// per criterion. IronXL: COUNTIF and AVERAGEIF use it too, and spill one result per criterion.
 fn args_signature_sumif_spill(arg_count: usize) -> Vec<Signature> {
     if arg_count == 2 {
         vec![Signature::Vector, Signature::Vector]
@@ -1152,7 +1139,7 @@ fn get_function_args_signature(kind: &Function, arg_count: usize) -> Vec<Signatu
         Function::Average => vec![Signature::Vector; arg_count],
         Function::Avedev => vec![Signature::Vector; arg_count],
         Function::Averagea => vec![Signature::Vector; arg_count],
-        Function::Averageif => args_signature_sumif(arg_count),
+        Function::Averageif => args_signature_sumif_spill(arg_count),
         Function::Averageifs => vec![Signature::Vector; arg_count],
         Function::Count => vec![Signature::Vector; arg_count],
         Function::Counta => vec![Signature::Vector; arg_count],
@@ -1708,8 +1695,8 @@ fn static_analysis_on_function(kind: &Function, args: &[Node]) -> StaticResult {
         Function::Sqrt => scalar_arguments(args),
         Function::Sqrtpi => StaticResult::Scalar,
         Function::Sum => StaticResult::Scalar,
-        Function::Sumif => sumif_static_result(args),
-        Function::Sumifs => not_implemented(args),
+        Function::Sumif => criteria_static_result(args, 1),
+        Function::Sumifs => criteria_static_result(args, 2),
         Function::Tan => scalar_arguments(args),
         Function::Tanh => scalar_arguments(args),
         Function::ErrorType => not_implemented(args),
@@ -1823,15 +1810,15 @@ fn static_analysis_on_function(kind: &Function, args: &[Node]) -> StaticResult {
         Function::Average => not_implemented(args),
         Function::Averagea => not_implemented(args),
         Function::Avedev => not_implemented(args),
-        Function::Averageif => not_implemented(args),
-        Function::Averageifs => not_implemented(args),
+        Function::Averageif => criteria_static_result(args, 1),
+        Function::Averageifs => criteria_static_result(args, 2),
         Function::Count => not_implemented(args),
         Function::Counta => not_implemented(args),
         Function::Countblank => not_implemented(args),
-        Function::Countif => sumif_static_result(args),
-        Function::Countifs => not_implemented(args),
-        Function::Maxifs => not_implemented(args),
-        Function::Minifs => not_implemented(args),
+        Function::Countif => criteria_static_result(args, 1),
+        Function::Countifs => criteria_static_result(args, 1),
+        Function::Maxifs => criteria_static_result(args, 2),
+        Function::Minifs => criteria_static_result(args, 2),
         // DATE broadcasts element-wise: an array/range argument yields an array.
         Function::Date => scalar_arguments(args),
         Function::Datedif => not_implemented(args),

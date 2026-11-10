@@ -599,7 +599,7 @@ impl<'a> Model<'a> {
     /// if sum_range is missing then criteria_range will be used.
     ///
     /// The `criteria` argument may be a single value, a range or an array; in the
-    /// latter two cases SUMIF spills one sum per criterion (see [`Model::sumif`]).
+    /// latter two cases SUMIF spills one sum per criterion (see [`Model::apply_ifs`]).
     pub(crate) fn fn_sumif(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         // When sum_range is missing, criteria_range doubles as the sum_range.
         let (criteria_range, criteria, sum_range) = match args.len() {
@@ -607,7 +607,8 @@ impl<'a> Model<'a> {
             3 => (&args[0], &args[1], &args[2]),
             _ => return CalcResult::new_args_number_error(cell),
         };
-        self.sumif(criteria_range, criteria, sum_range, cell)
+        let arguments = [sum_range.clone(), criteria_range.clone(), criteria.clone()];
+        self.sum_ifs(&arguments, cell, false)
     }
 
     /// SUMIFS(sum_range, criteria_range1, criteria1, [criteria_range2, criteria2], ...)
@@ -622,12 +623,13 @@ impl<'a> Model<'a> {
         cell: CellReferenceIndex,
         check_size: bool,
     ) -> CalcResult {
-        let mut total = 0.0;
-        let sum = |value| total += value;
-        if let Err(e) = self.apply_ifs(args, cell, check_size, sum) {
-            return e;
-        }
-        CalcResult::Number(total)
+        self.apply_ifs(args, cell, check_size, |run| {
+            let mut total = 0.0;
+            match run(&mut |value| total += value) {
+                Ok(()) => CalcResult::Number(total),
+                Err(error) => error,
+            }
+        })
     }
 
     pub(crate) fn fn_round(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
