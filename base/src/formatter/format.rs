@@ -76,6 +76,46 @@ fn get_fract_part(value: f64, precision: i32, int_len: usize) -> Vec<char> {
     b[2..last_non_zero].to_vec()
 }
 
+/// IronXL: `value` rounded to `decimals` digits after the point, half away from zero. The
+/// rounding reads the 15 significant digits of the value, as Excel does, so 1.005 rounds to 1.01.
+/// A value with 15 or more digits up to that place does not change.
+fn rounded(value: f64, decimals: i32) -> f64 {
+    let scale = 10.0_f64.powi(decimals);
+    let scaled = to_precision(value * scale, 15);
+    if scaled.abs() >= 1.0e15 {
+        return value;
+    }
+    to_precision(scaled.round() / scale, 15)
+}
+
+/// IronXL: the mantissa of `value` for a scientific section, with its sign, and the exponent.
+/// `whole` and `decimals` are the counts of the digit placeholders before and after the point.
+/// The exponent is a multiple of `whole`, as Excel shows `##0.0E+0`. With no digit placeholder
+/// before the point, the mantissa is from 0.1 to below 1, as Excel shows `.0E+0`. The mantissa
+/// rounds to `decimals` digits, and a carry moves the exponent, so 9.999 with `0.00E+00` shows
+/// `1.00E+01`. Zero has the exponent 0.
+fn scientific(value: f64, whole: i32, decimals: i32) -> (f64, i32) {
+    let size = value.abs();
+    if size == 0.0 {
+        return (0.0, 0);
+    }
+    let whole = whole.max(i32::from(decimals == 0));
+    let step = whole.max(1);
+    let form = format!("{size:e}");
+    let (_, exponent) = form.split_once('e').unwrap_or_default();
+    let mut exponent: i32 = exponent.parse().unwrap_or_default();
+    exponent -= exponent.rem_euclid(step);
+    if whole == 0 {
+        exponent += 1;
+    }
+    let mut mantissa = rounded(size / 10.0_f64.powi(exponent), decimals);
+    if mantissa >= 10.0_f64.powi(whole) {
+        exponent += step;
+        mantissa = rounded(size / 10.0_f64.powi(exponent), decimals);
+    }
+    (mantissa.copysign(value), exponent)
+}
+
 /// Return true if we need to add a separator in position digit_index
 /// It normally happens if if digit_index -1 is 3, 6, 9,... digit_index ≡ 1 mod 3
 fn use_group_separator(use_thousands: bool, digit_index: i32, group_sizes: &str) -> bool {
@@ -632,27 +672,19 @@ pub fn format_number_with_date_system(
             }
             let tokens = &p.tokens;
             value = value * 100.0_f64.powi(p.percent) / (1000.0_f64.powi(p.comma));
-            // p.precision is the number of significant digits _after_ the decimal point
-            value = to_precision(
-                value,
-                (p.precision as usize) + format!("{}", value.abs().floor()).len(),
-            );
-            let mut value_abs = value.abs();
             let mut exponent_part: Vec<char> = vec![];
-            let mut exponent_is_negative = value_abs < 10.0;
+            let mut exponent_is_negative = false;
             if p.is_scientific {
-                if value_abs == 0.0 {
-                    exponent_part = vec!['0'];
-                    exponent_is_negative = false;
-                } else {
-                    // TODO: Implement engineering formatting.
-                    let exponent = value_abs.log10().floor();
-                    exponent_part = format!("{}", exponent.abs()).chars().collect();
-                    value /= 10.0_f64.powf(exponent);
-                    value = to_precision(value, 15);
-                    value_abs = value.abs();
-                }
+                // IronXL: the mantissa and the exponent, as Excel shows them.
+                let (mantissa, exponent) = scientific(value, p.digit_count, p.precision);
+                exponent_part = format!("{}", exponent.abs()).chars().collect();
+                exponent_is_negative = exponent < 0;
+                value = mantissa;
+            } else {
+                // p.precision is the number of digits _after_ the decimal point
+                value = rounded(value, p.precision);
             }
+            let value_abs = value.abs();
             let l_exp = exponent_part.len() as i32;
             let int_number = if p.precision == 0 {
                 value_abs.round()
@@ -701,10 +733,22 @@ pub fn format_number_with_date_system(
                         text = format!("{text}{value}");
                     }
                     TextToken::Period => {
-                        // if !fract_part.is_empty() &&  {
-                        //     text = format!("{text}{decimal_separator}");
-                        // }
-                        needs_period = true;
+                        // IronXL: with no digit placeholder before the point, the sign and the
+                        // whole part of the value come before the point, as Excel shows `.0`. A
+                        // zero whole part shows no digit.
+                        if digit_count == 0 {
+                            if is_negative {
+                                text = format!("-{text}");
+                            }
+                            text.extend(&int_part);
+                        }
+                        // IronXL: with no digit placeholder after it, the point shows here, as
+                        // Excel shows `0.`.
+                        if p.precision == 0 {
+                            text = format!("{text}{decimal_separator}");
+                        } else {
+                            needs_period = true;
+                        }
                     }
                     TextToken::Digit(digit) => {
                         if digit.number.is_integer() {
