@@ -1,3 +1,5 @@
+use crate::arithmetic::bcast_idx;
+use crate::cast::calc_result_to_array_node;
 use crate::constants::{LAST_COLUMN, LAST_ROW};
 use crate::expressions::types::CellReferenceIndex;
 use crate::functions::util::build_criteria_with_date_system;
@@ -24,6 +26,34 @@ fn array_node_to_calc_result(node: &ArrayNode, cell: CellReferenceIndex) -> Calc
             message: "".to_string(),
         },
         ArrayNode::Empty => CalcResult::EmptyCell,
+    }
+}
+
+/// IronXL: a criteria argument. A range or an array gives a grid with one criterion for each cell
+/// or element.
+enum CriteriaArg {
+    Scalar(CalcResult),
+    Grid(Vec<Vec<CalcResult>>),
+}
+
+impl CriteriaArg {
+    /// The rows and columns of the criteria. A scalar has one row and one column.
+    fn dims(&self) -> (usize, usize) {
+        match self {
+            CriteriaArg::Scalar(_) => (1, 1),
+            CriteriaArg::Grid(grid) => (grid.len(), grid.first().map_or(0, Vec::len)),
+        }
+    }
+
+    /// The criterion at `row` and `column` of the broadcast shape. A scalar or a length-1 axis
+    /// repeats. A position that the grid does not have gives `None`.
+    fn at(&self, row: usize, column: usize) -> Option<&CalcResult> {
+        match self {
+            CriteriaArg::Scalar(value) => Some(value),
+            CriteriaArg::Grid(grid) => bcast_idx(grid.len(), row)
+                .and_then(|r| grid.get(r))
+                .and_then(|cells| bcast_idx(cells.len(), column).and_then(|c| cells.get(c))),
+        }
     }
 }
 
@@ -59,38 +89,12 @@ fn size_error(cell: CellReferenceIndex) -> CalcResult {
 
 impl<'a> Model<'a> {
     /// COUNTIF(range, criteria). IronXL: a range or an array criterion gives one count for each
-    /// criterion, in the shape of the criteria, as SUMIF does. A scalar criterion gives one count.
+    /// criterion, in the shape of the criteria. A scalar criterion gives one count.
     pub(crate) fn fn_countif(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() != 2 {
             return CalcResult::new_args_number_error(cell);
         }
-        let criteria_grid = match self.criteria_grid(&args[1], cell) {
-            Ok(Some(grid)) => grid,
-            Ok(None) => return self.fn_countifs(args, cell),
-            Err(error) => return error,
-        };
-        // An error of the range is the result for every criterion, so it is the whole result.
-        let range = match self.node_to_range(&args[0], cell) {
-            Ok(range) => range,
-            Err(error) => return error,
-        };
-        let mut output: Vec<Vec<ArrayNode>> = Vec::with_capacity(criteria_grid.len());
-        for criteria_row in &criteria_grid {
-            let mut out_row: Vec<ArrayNode> = Vec::with_capacity(criteria_row.len());
-            for criterion in criteria_row {
-                let fn_criteria = [build_criteria_with_date_system(
-                    criterion,
-                    self.locale,
-                    self.date_system,
-                )];
-                match self.count_ifs(std::slice::from_ref(&range), &fn_criteria, cell) {
-                    Ok(total) => out_row.push(ArrayNode::Number(total)),
-                    Err(error) => return error,
-                }
-            }
-            output.push(out_row);
-        }
-        CalcResult::Array(output)
+        self.fn_countifs(args, cell)
     }
 
     /// AVERAGEIF(criteria_range, criteria, [average_range])
@@ -108,57 +112,92 @@ impl<'a> Model<'a> {
         }
     }
 
-    // FIXME: This function shares a lot of code with apply_ifs. Can we merge them?
+    /// COUNTIFS(criteria_range1, criteria1, [criteria_range2, criteria2], ...). IronXL: a range or
+    /// an array criterion gives one count for each criterion (see [`Model::broadcast_criteria`]).
     pub(crate) fn fn_countifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         let args_count = args.len();
         if args_count < 2 || !args_count.is_multiple_of(2) {
             return CalcResult::new_args_number_error(cell);
         }
-
-        let case_count = args_count / 2;
-        // NB: this is a beautiful example of the borrow checker
-        // The order of these two definitions cannot be swapped.
-        let mut criteria = Vec::new();
-        let mut fn_criteria = Vec::new();
-        let ranges = &mut Vec::new();
-        for case_index in 0..case_count {
-            let criterion = self.evaluate_node_in_context(&args[case_index * 2 + 1], cell);
-            criteria.push(criterion);
-            // NB: We cannot do:
-            // fn_criteria.push(build_criteria(&criterion));
-            // because criterion doesn't live long enough
-            let result = self.evaluate_lookup_vector_node(&args[case_index * 2], cell);
-            if result.is_error() {
-                return result;
-            }
-            if let CalcResult::Range { left, right } = result {
-                if left.sheet != right.sheet {
-                    return CalcResult::new_error(
-                        Error::VALUE,
-                        cell,
-                        "Ranges are in different sheets".to_string(),
-                    );
-                }
-                ranges.push(Range { left, right });
-            } else {
-                return CalcResult::new_error(Error::VALUE, cell, "Expected a range".to_string());
-            }
-        }
+        let (ranges, criteria) = match self.criteria_pairs(args, cell) {
+            Ok(pairs) => pairs,
+            Err(error) => return error,
+        };
         // IronXL: each criteria range must have the rows and columns of the first range.
         if ranges.iter().any(|range| !same_size(range, &ranges[0])) {
             return size_error(cell);
         }
-        for criterion in criteria.iter() {
-            fn_criteria.push(build_criteria_with_date_system(
-                criterion,
-                self.locale,
-                self.date_system,
-            ));
+        self.broadcast_criteria(&criteria, |model, fn_criteria| {
+            match model.count_ifs(&ranges, fn_criteria, cell) {
+                Ok(total) => CalcResult::Number(total),
+                Err(error) => error,
+            }
+        })
+    }
+
+    /// IronXL: resolves each pair of a criteria range and a criteria argument in `pairs`. The
+    /// criteria comes before its range, as before. An error of a range is the whole result.
+    fn criteria_pairs(
+        &mut self,
+        pairs: &[Node],
+        cell: CellReferenceIndex,
+    ) -> Result<(Vec<Range>, Vec<CriteriaArg>), CalcResult> {
+        let mut ranges = Vec::with_capacity(pairs.len() / 2);
+        let mut criteria = Vec::with_capacity(pairs.len() / 2);
+        for [range, criterion] in pairs.as_chunks::<2>().0 {
+            criteria.push(self.criteria_arg(criterion, cell)?);
+            ranges.push(self.node_to_range(range, cell)?);
         }
-        match self.count_ifs(ranges, &fn_criteria, cell) {
-            Ok(total) => CalcResult::Number(total),
-            Err(error) => error,
+        Ok((ranges, criteria))
+    }
+
+    /// IronXL: calls `compute` with the predicates of the criteria. With scalar criteria only, the
+    /// result of `compute` is the result. Else the result is an array with the largest rows and
+    /// columns of the criteria, and `compute` runs once for each position. A scalar or a length-1
+    /// axis repeats, and a position that one criteria array does not have gives `#N/A`, as in
+    /// Excel. Shared by all criteria functions.
+    fn broadcast_criteria<F>(&mut self, criteria: &[CriteriaArg], mut compute: F) -> CalcResult
+    where
+        F: FnMut(&mut Self, &[Criterion<'_>]) -> CalcResult,
+    {
+        let locale = self.locale;
+        let date_system = self.date_system;
+        let build = |row: usize, column: usize| -> Option<Vec<Criterion<'_>>> {
+            criteria
+                .iter()
+                .map(|criterion| {
+                    criterion
+                        .at(row, column)
+                        .map(|value| build_criteria_with_date_system(value, locale, date_system))
+                })
+                .collect()
+        };
+        if criteria
+            .iter()
+            .all(|criterion| matches!(criterion, CriteriaArg::Scalar(_)))
+        {
+            // A scalar criterion is at each position.
+            let fn_criteria = build(0, 0).unwrap_or_default();
+            return compute(self, &fn_criteria);
         }
+        let (rows, columns) = criteria
+            .iter()
+            .map(CriteriaArg::dims)
+            .fold((1, 1), |(rows, columns), (r, c)| {
+                (rows.max(r), columns.max(c))
+            });
+        let mut output: Vec<Vec<ArrayNode>> = Vec::with_capacity(rows);
+        for row in 0..rows {
+            let mut out_row: Vec<ArrayNode> = Vec::with_capacity(columns);
+            for column in 0..columns {
+                out_row.push(match build(row, column) {
+                    Some(fn_criteria) => calc_result_to_array_node(compute(self, &fn_criteria)),
+                    None => ArrayNode::Error(Error::NA),
+                });
+            }
+            output.push(out_row);
+        }
+        CalcResult::Array(output)
     }
 
     /// Counts the cells of the first range where the cell of each range at the same offset meets
@@ -257,103 +296,50 @@ impl<'a> Model<'a> {
         Ok(total)
     }
 
-    /// Applies `apply` to each matching value of SUMIFS, AVERAGEIFS, MINIFS, or MAXIFS.
-    /// IronXL: with `check_size`, a criteria range with another size than the sum range gives
-    /// `#VALUE!`. SUMIF and AVERAGEIF call it without the check, as Excel gives no size error, and
-    /// their sum range takes the size of their one criteria range.
+    /// Folds the matching values of SUMIFS, AVERAGEIFS, MINIFS, or MAXIFS. `fold` gets a `run`
+    /// function that applies its argument to each matching value, and gives the result of one set of
+    /// criteria. IronXL: a range or an array criterion gives one result for each criterion (see
+    /// [`Model::broadcast_criteria`]). With `check_size`, a criteria range with another size than
+    /// the sum range gives `#VALUE!`. SUMIF and AVERAGEIF call it without the check, as Excel gives
+    /// no size error, and their sum range takes the size of their one criteria range.
     pub(crate) fn apply_ifs<F>(
         &mut self,
         args: &[Node],
         cell: CellReferenceIndex,
         check_size: bool,
-        apply: F,
-    ) -> Result<(), CalcResult>
+        mut fold: F,
+    ) -> CalcResult
     where
-        F: FnMut(f64),
+        F: FnMut(&mut dyn FnMut(&mut dyn FnMut(f64)) -> Result<(), CalcResult>) -> CalcResult,
     {
         let args_count = args.len();
         if args_count < 3 || args_count.is_multiple_of(2) {
-            return Err(CalcResult::new_args_number_error(cell));
+            return CalcResult::new_args_number_error(cell);
         }
-        let arg_0 = self.evaluate_lookup_vector_node(&args[0], cell);
-        if arg_0.is_error() {
-            return Err(arg_0);
-        }
-        let sum_range = if let CalcResult::Range { left, right } = arg_0 {
-            if left.sheet != right.sheet {
-                return Err(CalcResult::new_error(
-                    Error::VALUE,
-                    cell,
-                    "Ranges are in different sheets".to_string(),
-                ));
-            }
-            Range { left, right }
-        } else {
-            return Err(CalcResult::new_error(
-                Error::VALUE,
-                cell,
-                "Expected a range".to_string(),
-            ));
+        let sum_range = match self.node_to_range(&args[0], cell) {
+            Ok(range) => range,
+            Err(error) => return error,
         };
-
-        let case_count = (args_count - 1) / 2;
-        // NB: this is a beautiful example of the borrow checker
-        // The order of these two definitions cannot be swapped.
-        let mut criteria = Vec::new();
-        let mut fn_criteria = Vec::new();
-        let ranges = &mut Vec::new();
-        for case_index in 1..=case_count {
-            let criterion = self.evaluate_node_in_context(&args[case_index * 2], cell);
-            // NB: criterion might be an error. That's ok
-            criteria.push(criterion);
-            // NB: We cannot do:
-            // fn_criteria.push(build_criteria(&criterion));
-            // because criterion doesn't live long enough
-            let result = self.evaluate_lookup_vector_node(&args[case_index * 2 - 1], cell);
-            if result.is_error() {
-                return Err(result);
-            }
-            if let CalcResult::Range { left, right } = result {
-                if left.sheet != right.sheet {
-                    return Err(CalcResult::new_error(
-                        Error::VALUE,
-                        cell,
-                        "Ranges are in different sheets".to_string(),
-                    ));
-                }
-                ranges.push(Range { left, right });
-            } else {
-                return Err(CalcResult::new_error(
-                    Error::VALUE,
-                    cell,
-                    "Expected a range".to_string(),
-                ));
-            }
-        }
+        let (ranges, criteria) = match self.criteria_pairs(&args[1..], cell) {
+            Ok(pairs) => pairs,
+            Err(error) => return error,
+        };
         let sum_range = if check_size {
             if ranges.iter().any(|range| !same_size(range, &sum_range)) {
-                return Err(size_error(cell));
+                return size_error(cell);
             }
             sum_range
         } else {
             resized_range(&sum_range, &ranges[0])
         };
-        for criterion in criteria.iter() {
-            fn_criteria.push(build_criteria_with_date_system(
-                criterion,
-                self.locale,
-                self.date_system,
-            ));
-        }
-
-        self.run_ifs(&sum_range, ranges.as_slice(), &fn_criteria, cell, apply)
+        self.broadcast_criteria(&criteria, |model, fn_criteria| {
+            fold(&mut |apply| model.run_ifs(&sum_range, &ranges, fn_criteria, cell, apply))
+        })
     }
 
     /// Walks `sum_range` and applies `apply` to every numeric cell whose parallel
     /// cell in each criteria range satisfies the matching criterion. `ranges` and
     /// `fn_criteria` are parallel (one criteria range and one predicate per case).
-    ///
-    /// Shared by [`Model::apply_ifs`] and the array-criteria path of SUMIF.
     pub(crate) fn run_ifs<F>(
         &mut self,
         sum_range: &Range,
@@ -423,13 +409,13 @@ impl<'a> Model<'a> {
         Ok(())
     }
 
-    /// Collects a range or an array criteria argument into a 2-D grid of scalar criteria, one for
-    /// each cell or element. A scalar criterion gives `None`. IronXL: shared by SUMIF and COUNTIF.
-    fn criteria_grid(
+    /// IronXL: evaluates a criteria argument. A range or an array gives a grid of scalar criteria,
+    /// one for each cell or element.
+    fn criteria_arg(
         &mut self,
         criteria: &Node,
         cell: CellReferenceIndex,
-    ) -> Result<Option<Vec<Vec<CalcResult>>>, CalcResult> {
+    ) -> Result<CriteriaArg, CalcResult> {
         match self.evaluate_node_in_context(criteria, cell) {
             CalcResult::Range { left, right } => {
                 if left.sheet != right.sheet {
@@ -451,9 +437,9 @@ impl<'a> Model<'a> {
                     }
                     grid.push(row);
                 }
-                Ok(Some(grid))
+                Ok(CriteriaArg::Grid(grid))
             }
-            CalcResult::Array(array) => Ok(Some(
+            CalcResult::Array(array) => Ok(CriteriaArg::Grid(
                 array
                     .iter()
                     .map(|row| {
@@ -463,7 +449,7 @@ impl<'a> Model<'a> {
                     })
                     .collect(),
             )),
-            _ => Ok(None),
+            value => Ok(CriteriaArg::Scalar(value)),
         }
     }
 
@@ -495,68 +481,6 @@ impl<'a> Model<'a> {
         }
     }
 
-    /// SUMIF where the `criteria` argument may be a single value, a range or an
-    /// array. A scalar criterion yields a single sum; a range or array criterion
-    /// spills one sum per criterion element, preserving the criteria's shape.
-    pub(crate) fn sumif(
-        &mut self,
-        criteria_range: &Node,
-        criteria: &Node,
-        sum_range: &Node,
-        cell: CellReferenceIndex,
-    ) -> CalcResult {
-        // A scalar criterion takes the ordinary (non-spilling) SUMIFS path.
-        let criteria_grid = match self.criteria_grid(criteria, cell) {
-            Ok(Some(grid)) => grid,
-            Ok(None) => {
-                // Single criterion: delegate to SUMIFS, which returns a scalar.
-                let arguments = vec![sum_range.clone(), criteria_range.clone(), criteria.clone()];
-                return self.sum_ifs(&arguments, cell, false);
-            }
-            Err(error) => return error,
-        };
-
-        // Range/array criteria: resolve the ranges once, then compute one sum
-        // per criterion and spill the results.
-        let sum_range = match self.node_to_range(sum_range, cell) {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
-        let criteria_range = match self.node_to_range(criteria_range, cell) {
-            Ok(r) => r,
-            Err(e) => return e,
-        };
-        // IronXL: the sum range takes the size of the criteria range, as on the scalar path.
-        let sum_range = resized_range(&sum_range, &criteria_range);
-
-        let mut output: Vec<Vec<ArrayNode>> = Vec::with_capacity(criteria_grid.len());
-        for criteria_row in &criteria_grid {
-            let mut out_row: Vec<ArrayNode> = Vec::with_capacity(criteria_row.len());
-            for criterion in criteria_row {
-                let fn_criteria = [build_criteria_with_date_system(
-                    criterion,
-                    self.locale,
-                    self.date_system,
-                )];
-                let mut total = 0.0;
-                let node = match self.run_ifs(
-                    &sum_range,
-                    std::slice::from_ref(&criteria_range),
-                    &fn_criteria,
-                    cell,
-                    |v| total += v,
-                ) {
-                    Ok(()) => ArrayNode::Number(total),
-                    Err(CalcResult::Error { error, .. }) => ArrayNode::Error(error),
-                    Err(_) => ArrayNode::Error(Error::ERROR),
-                };
-                out_row.push(node);
-            }
-            output.push(out_row);
-        }
-        CalcResult::Array(output)
-    }
-
     pub(crate) fn fn_averageifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         self.average_ifs(args, cell, true)
     }
@@ -568,49 +492,43 @@ impl<'a> Model<'a> {
         cell: CellReferenceIndex,
         check_size: bool,
     ) -> CalcResult {
-        let mut total = 0.0;
-        let mut count = 0.0;
-
-        let average = |value: f64| {
-            total += value;
-            count += 1.0;
-        };
-        if let Err(e) = self.apply_ifs(args, cell, check_size, average) {
-            return e;
-        }
-
-        if count == 0.0 {
-            return CalcResult::Error {
-                error: Error::DIV,
-                origin: cell,
-                message: "division by 0".to_string(),
-            };
-        }
-        CalcResult::Number(total / count)
+        self.apply_ifs(args, cell, check_size, |run| {
+            let mut total = 0.0;
+            let mut count = 0.0;
+            if let Err(e) = run(&mut |value| {
+                total += value;
+                count += 1.0;
+            }) {
+                return e;
+            }
+            if count == 0.0 {
+                return CalcResult::Error {
+                    error: Error::DIV,
+                    origin: cell,
+                    message: "division by 0".to_string(),
+                };
+            }
+            CalcResult::Number(total / count)
+        })
     }
 
     pub(crate) fn fn_minifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
-        let mut min = f64::INFINITY;
-        let apply_min = |value: f64| min = value.min(min);
-        if let Err(e) = self.apply_ifs(args, cell, true, apply_min) {
-            return e;
-        }
-
-        if min.is_infinite() {
-            min = 0.0;
-        }
-        CalcResult::Number(min)
+        self.apply_ifs(args, cell, true, |run| {
+            let mut min = f64::INFINITY;
+            if let Err(e) = run(&mut |value| min = value.min(min)) {
+                return e;
+            }
+            CalcResult::Number(if min.is_infinite() { 0.0 } else { min })
+        })
     }
 
     pub(crate) fn fn_maxifs(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
-        let mut max = -f64::INFINITY;
-        let apply_max = |value: f64| max = value.max(max);
-        if let Err(e) = self.apply_ifs(args, cell, true, apply_max) {
-            return e;
-        }
-        if max.is_infinite() {
-            max = 0.0;
-        }
-        CalcResult::Number(max)
+        self.apply_ifs(args, cell, true, |run| {
+            let mut max = -f64::INFINITY;
+            if let Err(e) = run(&mut |value| max = value.max(max)) {
+                return e;
+            }
+            CalcResult::Number(if max.is_infinite() { 0.0 } else { max })
+        })
     }
 }
