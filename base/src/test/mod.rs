@@ -152,6 +152,7 @@ mod test_shared_formula_index;
 mod test_sheet_names;
 mod test_spill_functions;
 mod test_text_locale_tags;
+mod test_text_point_codes;
 mod test_text_section;
 mod test_time_text;
 mod test_today;

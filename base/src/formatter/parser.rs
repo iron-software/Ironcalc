@@ -237,7 +237,9 @@ impl Parser {
                         }
                         tokens.push(TextToken::SecondDecimals(decimals));
                         next_token = self.lexer.next_token();
-                    } else if is_number && !found_decimal_dot {
+                    } else if (is_number || next_token.is_digit()) && !found_decimal_dot {
+                        // IronXL: a point before the first digit placeholder is the decimal point
+                        // too, as Excel reads `.0`.
                         tokens.push(TextToken::Period);
                         found_decimal_dot = true;
                         if number.is_integer() {
