@@ -6,6 +6,7 @@ mod test_fr_examples;
 mod test_general;
 mod test_letter_case;
 mod test_locale_tags;
+mod test_negative_sign;
 mod test_parse_formatted_number;
 mod test_point_codes;
 mod test_scientific;

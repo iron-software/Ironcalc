@@ -715,14 +715,10 @@ pub fn format_number_with_date_system(
             let group_sizes = locale.numbers.decimal_formats.standard.to_owned();
             let group_separator = symbols.group.to_owned();
             let decimal_separator = symbols.decimal.to_owned();
-            // There probably are better ways to check if a number at a given precision is negative :/
-            // IronXL: a scientific mantissa is not zero for a value that is not zero, so it keeps
-            // the sign of the value, as Excel shows -1E+3 for -1234 with 0E+0.
-            let is_negative = if p.is_scientific {
-                value < 0.0
-            } else {
-                value < -(10.0_f64.powf(-(p.precision as f64)))
-            };
+            // IronXL: the value is rounded to its last digit here, so it shows `-` when it is below
+            // zero, as Excel shows -1 for -1 with 0. A value that rounds to zero is -0 and shows no
+            // sign. A scientific mantissa is not zero for a value that is not zero.
+            let is_negative = value < 0.0;
             let mut needs_period = false;
 
             for token in tokens {
