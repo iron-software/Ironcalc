@@ -5,6 +5,7 @@ mod fn_arraytotext;
 mod fn_char_code;
 mod fn_clean;
 mod fn_left_right_mid_arrays;
+mod fn_len_arrays;
 mod fn_regex;
 mod fn_textbefore;
 mod fn_textjoin;
