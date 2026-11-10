@@ -688,18 +688,23 @@ fn stringify(
                 language
             )
         ),
+        // IronXL: an operand keeps its parentheses when its operator binds less tightly than the
+        // parent operator, and on the right side also when it binds equally, as operators of one
+        // level read from left to right. So the text parses back to the same tree.
         OpConcatenateKind { left, right } => format!(
             "{}&{}",
-            stringify(
+            stringify_operand(
                 left,
+                precedence(left) < CONCATENATE_PRECEDENCE,
                 context,
                 displace_data,
                 export_to_excel,
                 locale,
                 language
             ),
-            stringify(
+            stringify_operand(
                 right,
+                precedence(right) <= CONCATENATE_PRECEDENCE,
                 context,
                 displace_data,
                 export_to_excel,
@@ -718,8 +723,9 @@ fn stringify(
                 language
             ),
             kind,
-            stringify(
+            stringify_operand(
                 right,
+                precedence(right) <= COMPARE_PRECEDENCE,
                 context,
                 displace_data,
                 export_to_excel,
@@ -728,100 +734,48 @@ fn stringify(
             )
         ),
         OpSumKind { kind, left, right } => {
-            // CompareKind has lower precedence than +/-, so wrap it to preserve semantics
-            let left_str = if matches!(**left, CompareKind { .. }) {
-                format!(
-                    "({})",
-                    stringify(
-                        left,
-                        context,
-                        displace_data,
-                        export_to_excel,
-                        locale,
-                        language
-                    )
-                )
-            } else {
-                stringify(
-                    left,
-                    context,
-                    displace_data,
-                    export_to_excel,
-                    locale,
-                    language,
-                )
-            };
-            // if kind is minus then we need parentheses in the right side if they are OpSumKind or CompareKind
-            let right_str = if (matches!(kind, OpSum::Minus) && matches!(**right, OpSumKind { .. }))
-                | matches!(**right, CompareKind { .. })
-            {
-                format!(
-                    "({})",
-                    stringify(
-                        right,
-                        context,
-                        displace_data,
-                        export_to_excel,
-                        locale,
-                        language
-                    )
-                )
-            } else {
-                stringify(
-                    right,
-                    context,
-                    displace_data,
-                    export_to_excel,
-                    locale,
-                    language,
-                )
-            };
+            let left_str = stringify_operand(
+                left,
+                precedence(left) < SUM_PRECEDENCE,
+                context,
+                displace_data,
+                export_to_excel,
+                locale,
+                language,
+            );
+            // An addition keeps the text `1+3+5` of `1+(3+5)`, as the old text did.
+            let right_str = stringify_operand(
+                right,
+                precedence(right) < SUM_PRECEDENCE
+                    || (matches!(kind, OpSum::Minus) && matches!(**right, OpSumKind { .. })),
+                context,
+                displace_data,
+                export_to_excel,
+                locale,
+                language,
+            );
 
             format!("{left_str}{kind}{right_str}")
         }
         OpProductKind { kind, left, right } => {
-            let x = match **left {
-                OpSumKind { .. } | CompareKind { .. } => format!(
-                    "({})",
-                    stringify(
-                        left,
-                        context,
-                        displace_data,
-                        export_to_excel,
-                        locale,
-                        language
-                    )
-                ),
-                _ => stringify(
-                    left,
-                    context,
-                    displace_data,
-                    export_to_excel,
-                    locale,
-                    language,
-                ),
-            };
-            let y = match **right {
-                OpSumKind { .. } | CompareKind { .. } | OpProductKind { .. } => format!(
-                    "({})",
-                    stringify(
-                        right,
-                        context,
-                        displace_data,
-                        export_to_excel,
-                        locale,
-                        language
-                    )
-                ),
-                _ => stringify(
-                    right,
-                    context,
-                    displace_data,
-                    export_to_excel,
-                    locale,
-                    language,
-                ),
-            };
+            let x = stringify_operand(
+                left,
+                precedence(left) < PRODUCT_PRECEDENCE,
+                context,
+                displace_data,
+                export_to_excel,
+                locale,
+                language,
+            );
+            let y = stringify_operand(
+                right,
+                precedence(right) <= PRODUCT_PRECEDENCE,
+                context,
+                displace_data,
+                export_to_excel,
+                locale,
+                language,
+            );
             format!("{x}{kind}{y}")
         }
         OpPowerKind { left, right } => {
@@ -996,7 +950,6 @@ fn stringify(
                     | WrongReferenceKind { .. }
                     | WrongRangeKind { .. }
                     | OpRangeKind { .. }
-                    | OpConcatenateKind { .. }
                     | OpProductKind { .. }
                     | FunctionKind { .. }
                     | NamedFunctionKind { .. }
@@ -1009,12 +962,16 @@ fn stringify(
                     | NamedVariableKind { .. }
                     | ImplicitIntersection { .. }
                     | SpillRangeOperator { .. }
-                    | CompareKind { .. }
                     | ErrorKind(_)
                     | ParseErrorKind { .. }
                     | EmptyArgKind => false,
 
-                    OpPowerKind { .. } | OpSumKind { .. } | UnaryKind { .. } => true,
+                    // IronXL: `-(a>b)` and `-(a&b)` keep their parentheses, as `-a>b` is `(-a)>b`.
+                    OpPowerKind { .. }
+                    | OpSumKind { .. }
+                    | UnaryKind { .. }
+                    | CompareKind { .. }
+                    | OpConcatenateKind { .. } => true,
                 };
                 if needs_parentheses {
                     format!(
@@ -1042,19 +999,20 @@ fn stringify(
                     )
                 }
             }
-            OpUnary::Percentage => {
-                format!(
-                    "{}%",
-                    stringify(
-                        right,
-                        context,
-                        displace_data,
-                        export_to_excel,
-                        locale,
-                        language
-                    )
+            // IronXL: `%` binds more tightly than each binary operator, so `(a+b)%` keeps its
+            // parentheses.
+            OpUnary::Percentage => format!(
+                "{}%",
+                stringify_operand(
+                    right,
+                    precedence(right) < PERCENT_PRECEDENCE,
+                    context,
+                    displace_data,
+                    export_to_excel,
+                    locale,
+                    language
                 )
-            }
+            ),
         },
         ErrorKind(kind) => format!("{kind}"),
         ParseErrorKind { formula, .. } => formula.to_string(),
@@ -1180,6 +1138,62 @@ fn stringify(
                 )
             )
         }
+    }
+}
+
+// IronXL: the binding strength of the operator at the root of a node, in the Excel order: comparison,
+// `&`, `+` and `-`, `*` and `/`, `^`, `%`, and unary minus. A node without an operator binds the most
+// tightly.
+const COMPARE_PRECEDENCE: u8 = 1;
+const CONCATENATE_PRECEDENCE: u8 = 2;
+const SUM_PRECEDENCE: u8 = 3;
+const PRODUCT_PRECEDENCE: u8 = 4;
+const POWER_PRECEDENCE: u8 = 5;
+const PERCENT_PRECEDENCE: u8 = 6;
+const MINUS_PRECEDENCE: u8 = 7;
+const OPERAND_PRECEDENCE: u8 = 8;
+
+fn precedence(node: &Node) -> u8 {
+    match node {
+        Node::CompareKind { .. } => COMPARE_PRECEDENCE,
+        Node::OpConcatenateKind { .. } => CONCATENATE_PRECEDENCE,
+        Node::OpSumKind { .. } => SUM_PRECEDENCE,
+        Node::OpProductKind { .. } => PRODUCT_PRECEDENCE,
+        Node::OpPowerKind { .. } => POWER_PRECEDENCE,
+        Node::UnaryKind {
+            kind: OpUnary::Percentage,
+            ..
+        } => PERCENT_PRECEDENCE,
+        Node::UnaryKind {
+            kind: OpUnary::Minus,
+            ..
+        } => MINUS_PRECEDENCE,
+        _ => OPERAND_PRECEDENCE,
+    }
+}
+
+// IronXL: the text of an operand, in parentheses when `parentheses` is true.
+fn stringify_operand(
+    node: &Node,
+    parentheses: bool,
+    context: Option<&CellReferenceRC>,
+    displace_data: &DisplaceData,
+    export_to_excel: bool,
+    locale: &Locale,
+    language: &Language,
+) -> String {
+    let text = stringify(
+        node,
+        context,
+        displace_data,
+        export_to_excel,
+        locale,
+        language,
+    );
+    if parentheses {
+        format!("({text})")
+    } else {
+        text
     }
 }
 
