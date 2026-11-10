@@ -734,14 +734,14 @@ impl<'a> Model<'a> {
         }
     }
 
-    // ROWS(range)
-    // Returns the number of rows in range
+    // ROWS(array)
+    // Returns the number of rows in an array or a reference. A scalar is an array of one element.
     pub(crate) fn fn_rows(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() != 1 {
             return CalcResult::new_args_number_error(cell);
         }
-        match self.get_reference(&args[0], cell) {
-            Ok(c) => CalcResult::Number((c.right.row - c.left.row + 1) as f64),
+        match self.get_shape(&args[0], cell) {
+            Ok((rows, _)) => CalcResult::Number(rows as f64),
             Err(s) => s,
         }
     }
@@ -837,14 +837,14 @@ impl<'a> Model<'a> {
         calc_result_to_array_node(value)
     }
 
-    // COLUMNS(range)
-    // Returns the number of columns in range
+    // COLUMNS(array)
+    // Returns the number of columns in an array or a reference. A scalar is an array of one element.
     pub(crate) fn fn_columns(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() != 1 {
             return CalcResult::new_args_number_error(cell);
         }
-        match self.get_reference(&args[0], cell) {
-            Ok(c) => CalcResult::Number((c.right.column - c.left.column + 1) as f64),
+        match self.get_shape(&args[0], cell) {
+            Ok((_, columns)) => CalcResult::Number(columns as f64),
             Err(s) => s,
         }
     }

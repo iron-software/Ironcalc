@@ -388,6 +388,40 @@ impl<'a> Model<'a> {
         }
     }
 
+    /// IronXL: gives the number of rows and columns of an argument that a function reads as an
+    /// array or a reference, as `ROWS` and `COLUMNS` do in Excel. A reference gives the size of its
+    /// range, an array gives its size, and each other value is an array of one element. An error
+    /// argument gives its error. An error element of an array does not change the size.
+    pub(crate) fn get_shape(
+        &mut self,
+        node: &Node,
+        cell: CellReferenceIndex,
+    ) -> Result<(i32, i32), CalcResult> {
+        if let Node::ReferenceKind { .. } = node {
+            return Ok((1, 1));
+        }
+        match self.evaluate_reference_argument(node, cell) {
+            CalcResult::Range { left, right } => {
+                Ok((right.row - left.row + 1, right.column - left.column + 1))
+            }
+            CalcResult::Array(array) => Ok((
+                array.len() as i32,
+                array.first().map(|row| row.len()).unwrap_or(0) as i32,
+            )),
+            error @ CalcResult::Error { .. } => Err(error),
+            CalcResult::Lambda(_) => Err(CalcResult::Error {
+                error: Error::VALUE,
+                origin: cell,
+                message: "Expected array or reference".to_string(),
+            }),
+            CalcResult::String(_)
+            | CalcResult::Number(_)
+            | CalcResult::Boolean(_)
+            | CalcResult::EmptyCell
+            | CalcResult::EmptyArg => Ok((1, 1)),
+        }
+    }
+
     // tries to return a reference. That is either a reference or a formula that evaluates to a range/reference
     pub(crate) fn get_reference(
         &mut self,
