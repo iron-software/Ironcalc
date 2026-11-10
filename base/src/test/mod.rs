@@ -63,6 +63,7 @@ mod test_fn_rept;
 mod test_fn_sequence;
 mod test_fn_sum;
 mod test_fn_sumif_array;
+mod test_fn_sumif_resize;
 mod test_fn_sumifs;
 mod test_fn_time;
 mod test_frozen_rows_columns;

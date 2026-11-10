@@ -34,6 +34,20 @@ fn same_size(first: &Range, second: &Range) -> bool {
         && first.right.column - first.left.column == second.right.column - second.left.column
 }
 
+/// IronXL: the sum range of SUMIF or the average range of AVERAGEIF, resized as Excel does. The
+/// range starts at the top-left cell of `sum_range` and has the rows and columns of
+/// `criteria_range`. It stops at the last row and the last column of the sheet.
+fn resized_range(sum_range: &Range, criteria_range: &Range) -> Range {
+    let mut right = sum_range.left;
+    right.row = (right.row + criteria_range.right.row - criteria_range.left.row).min(LAST_ROW);
+    right.column =
+        (right.column + criteria_range.right.column - criteria_range.left.column).min(LAST_COLUMN);
+    Range {
+        left: sum_range.left,
+        right,
+    }
+}
+
 /// IronXL: the `#VALUE!` error of a criteria range with another size than the first range.
 fn size_error(cell: CellReferenceIndex) -> CalcResult {
     CalcResult::new_error(
@@ -245,7 +259,8 @@ impl<'a> Model<'a> {
 
     /// Applies `apply` to each matching value of SUMIFS, AVERAGEIFS, MINIFS, or MAXIFS.
     /// IronXL: with `check_size`, a criteria range with another size than the sum range gives
-    /// `#VALUE!`. SUMIF and AVERAGEIF call it without the check, as Excel gives no size error.
+    /// `#VALUE!`. SUMIF and AVERAGEIF call it without the check, as Excel gives no size error, and
+    /// their sum range takes the size of their one criteria range.
     pub(crate) fn apply_ifs<F>(
         &mut self,
         args: &[Node],
@@ -315,9 +330,14 @@ impl<'a> Model<'a> {
                 ));
             }
         }
-        if check_size && ranges.iter().any(|range| !same_size(range, &sum_range)) {
-            return Err(size_error(cell));
-        }
+        let sum_range = if check_size {
+            if ranges.iter().any(|range| !same_size(range, &sum_range)) {
+                return Err(size_error(cell));
+            }
+            sum_range
+        } else {
+            resized_range(&sum_range, &ranges[0])
+        };
         for criterion in criteria.iter() {
             fn_criteria.push(build_criteria_with_date_system(
                 criterion,
@@ -350,9 +370,11 @@ impl<'a> Model<'a> {
         let mut right_row = sum_range.right.row;
         let mut right_column = sum_range.right.column;
 
-        if left_row == 1 && right_row == LAST_ROW {
-            right_row = match self.workbook.worksheet(sum_range.left.sheet) {
-                Ok(s) => s.dimension().max_row,
+        // IronXL: a range that ends at the last row or column stops at the used range of its
+        // sheet, also when it does not start at row 1 or column 1. Those cells hold no number.
+        if right_row == LAST_ROW || right_column == LAST_COLUMN {
+            let dimension = match self.workbook.worksheet(sum_range.left.sheet) {
+                Ok(s) => s.dimension(),
                 Err(_) => {
                     return Err(CalcResult::new_error(
                         Error::ERROR,
@@ -361,18 +383,12 @@ impl<'a> Model<'a> {
                     ));
                 }
             };
-        }
-        if left_column == 1 && right_column == LAST_COLUMN {
-            right_column = match self.workbook.worksheet(sum_range.left.sheet) {
-                Ok(s) => s.dimension().max_column,
-                Err(_) => {
-                    return Err(CalcResult::new_error(
-                        Error::ERROR,
-                        cell,
-                        format!("Invalid worksheet index: '{}'", sum_range.left.sheet),
-                    ));
-                }
-            };
+            if right_row == LAST_ROW {
+                right_row = dimension.max_row;
+            }
+            if right_column == LAST_COLUMN {
+                right_column = dimension.max_column;
+            }
         }
 
         for row in left_row..right_row + 1 {
@@ -510,6 +526,8 @@ impl<'a> Model<'a> {
             Ok(r) => r,
             Err(e) => return e,
         };
+        // IronXL: the sum range takes the size of the criteria range, as on the scalar path.
+        let sum_range = resized_range(&sum_range, &criteria_range);
 
         let mut output: Vec<Vec<ArrayNode>> = Vec::with_capacity(criteria_grid.len());
         for criteria_row in &criteria_grid {
