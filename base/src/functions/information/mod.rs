@@ -2,6 +2,7 @@ mod isomitted;
 
 use crate::{
     calc_result::CalcResult,
+    cast::ValueOrArray,
     expressions::{
         parser::{ArrayNode, Node},
         token::Error,
@@ -24,16 +25,42 @@ fn get_system() -> String {
 }
 
 impl<'a> Model<'a> {
-    pub(crate) fn fn_isnumber(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
-        if args.len() == 1 {
-            match self.evaluate_node_in_context(&args[0], cell) {
-                CalcResult::Number(_) => return CalcResult::Boolean(true),
-                _ => {
-                    return CalcResult::Boolean(false);
-                }
-            };
+    /// Applies a type test to the one argument of an IS function.
+    /// A scalar, also an error, gives one Boolean. An array or a range gives one Boolean for
+    /// each element, in its shape, as in Excel.
+    fn type_test_on_value_or_array(
+        &mut self,
+        args: &[Node],
+        cell: CellReferenceIndex,
+        value_test: fn(&CalcResult) -> bool,
+        element_test: fn(&ArrayNode) -> bool,
+    ) -> CalcResult {
+        if args.len() != 1 {
+            return CalcResult::new_args_number_error(cell);
         }
-        CalcResult::new_args_number_error(cell)
+        match self.get_value_or_array(&args[0], cell) {
+            Ok(ValueOrArray::Array(array)) => CalcResult::Array(
+                array
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|element| ArrayNode::Boolean(element_test(element)))
+                            .collect()
+                    })
+                    .collect(),
+            ),
+            Ok(ValueOrArray::Value(value)) => CalcResult::Boolean(value_test(&value)),
+            Err(error) => CalcResult::Boolean(value_test(&error)),
+        }
+    }
+
+    pub(crate) fn fn_isnumber(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
+        self.type_test_on_value_or_array(
+            args,
+            cell,
+            |value| matches!(value, CalcResult::Number(_)),
+            |element| matches!(element, ArrayNode::Number(_)),
+        )
     }
     pub(crate) fn fn_istext(&mut self, args: &[Node], cell: CellReferenceIndex) -> CalcResult {
         if args.len() == 1 {

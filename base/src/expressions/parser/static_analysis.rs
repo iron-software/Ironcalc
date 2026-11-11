@@ -1708,7 +1708,8 @@ fn static_analysis_on_function(kind: &Function, args: &[Node]) -> StaticResult {
         Function::Islogical => not_implemented(args),
         Function::Isna => not_implemented(args),
         Function::Isnontext => not_implemented(args),
-        Function::Isnumber => not_implemented(args),
+        // ISNUMBER tests each element: an array/range argument yields an array.
+        Function::Isnumber => scalar_arguments(args),
         Function::Isodd => not_implemented(args),
         Function::Isomitted => not_implemented(args),
         Function::Isref => not_implemented(args),
