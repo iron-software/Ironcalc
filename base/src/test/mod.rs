@@ -161,6 +161,7 @@ mod test_spill_functions;
 mod test_text_empty_code;
 mod test_text_general;
 mod test_text_locale_tags;
+mod test_text_long_exponent;
 mod test_text_negative_sign;
 mod test_text_point_codes;
 mod test_text_section;
