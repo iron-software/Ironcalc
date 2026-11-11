@@ -934,11 +934,16 @@ fn format_number_with_general(
 
                                     text = format!("{text}{c}");
                                 }
-                            } else {
+                            } else if index == 0 {
+                                // IronXL: the exponent has more digits than the code. The first
+                                // placeholder shows the extra leading digits and its own digit.
                                 for i in 0..number_index + 1 {
                                     text = format!("{}{}", text, exponent_part[i as usize]);
                                 }
                                 digit_index += number_index + 1;
+                            } else {
+                                // IronXL: each later placeholder shows one digit.
+                                text = format!("{text}{}", exponent_part[number_index as usize]);
                             }
                         }
                     }
