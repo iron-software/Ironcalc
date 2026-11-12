@@ -227,7 +227,19 @@ impl<'a> Lexer<'a> {
                     '=' => TokenType::Compare(OpCompare::Equal),
                     '{' => TokenType::LeftBrace,
                     '}' => TokenType::RightBrace,
-                    '[' => TokenType::LeftBracket,
+                    '[' => {
+                        // A structured reference without a table name, such as [@Amount], in A1 mode
+                        self.position -= 1;
+                        let reference = if self.mode == LexerMode::A1 {
+                            self.consume_unqualified_structured_reference()
+                        } else {
+                            None
+                        };
+                        reference.unwrap_or_else(|| {
+                            self.position += 1;
+                            TokenType::LeftBracket
+                        })
+                    }
                     ']' => TokenType::RightBracket,
                     ':' => TokenType::Colon,
                     ';' => TokenType::Semicolon,

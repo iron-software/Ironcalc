@@ -160,6 +160,7 @@ mod test_set_functions_error_handling;
 mod test_shared_formula_index;
 mod test_sheet_names;
 mod test_spill_functions;
+mod test_structured_references;
 mod test_text_empty_code;
 mod test_text_general;
 mod test_text_general_literals;

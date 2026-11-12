@@ -207,6 +207,10 @@ pub enum TableSpecifier {
     Headers,
     ThisRow,
     Totals,
+    /// `[#Headers],[#Data]`
+    HeadersData,
+    /// `[#Data],[#Totals]`
+    DataTotals,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
