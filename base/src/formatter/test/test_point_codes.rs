@@ -150,10 +150,25 @@ fn scientific_mantissa_of_a_very_small_or_large_value_is_finite() {
         (1e-310, "0E+0", "1E-310"),
         (1e-310, ".0E+0", ".1E-309"),
         (-1e-310, "0.0E+0", "-1.0E-310"),
-        (5e-324, "0.0E+0", "5.0E-324"),
+        (5e-324, "0.0E+0", "4.9E-324"),
         (1.797_693_134_862_315_7e308, "0.0E+0", "1.8E+308"),
         (1.797_693_134_862_315_7e308, ".0E+0", ".2E+309"),
         (9.999_999_999_999_99e307, "0.0E+0", "1.0E+308"),
+    ]);
+}
+
+// IronXL: the scientific mantissa and exponent of a value below 1E-308 come from its 15
+// significant digits, not from the shortest text of the value.
+#[test]
+fn scientific_text_of_a_very_small_value_reads_its_15_significant_digits() {
+    assert_texts(&[
+        (1e-323, "0.00E+00", "9.88E-324"),
+        (1e-322, "00.00E+00", "98.81E-324"),
+        (-1e-321, "0.000E+000", "-9.980E-322"),
+        (-9.25e-310, "0.0E+0", "-9.2E-310"),
+        (-7.0625e-310, "##0.0E+0", "-706.2E-312"),
+        (-1.25e-312, "0.0E+0", "-1.2E-312"),
+        (5e-324, "0.00E+00", "4.94E-324"),
     ]);
 }
 
