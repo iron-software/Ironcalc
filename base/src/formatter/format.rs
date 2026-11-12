@@ -362,6 +362,16 @@ pub fn format_text_number(
     format_number_with_general(value, format, locale, date_system, text_general)
 }
 
+// IronXL: whether the section `part` holds `@`, the text of a text value.
+fn has_raw(part: &ParsePart) -> bool {
+    let tokens = match part {
+        ParsePart::Number(p) => &p.tokens,
+        ParsePart::Date(p) => &p.tokens,
+        ParsePart::Error(..) | ParsePart::General(..) => return false,
+    };
+    tokens.iter().any(|t| matches!(t, TextToken::Raw))
+}
+
 /// IronXL: formats a number; `general` gives the text of a General section.
 fn format_number_with_general(
     value_original: f64,
@@ -385,57 +395,51 @@ fn format_number_with_general(
     // you must include a semicolon for each of the missing sections of code.
     // You can use the ampersand (&) text operator to join, or concatenate, two values.
     let mut value = value_original;
-    let part;
-    match parts.len() {
-        // IronXL: an empty code has no section and shows the empty text, as Excel does.
-        0 => {
-            return Formatted {
-                text: String::new(),
-                color: None,
-                error: None,
-            };
-        }
-        1 => {
-            part = &parts[0];
-        }
-        2 => {
-            if value >= 0.0 {
-                part = &parts[0]
-            } else {
-                value = -value;
-                part = &parts[1];
-            }
-        }
-        3 => {
-            if value > 0.0 {
-                part = &parts[0]
-            } else if value < 0.0 {
-                value = -value;
-                part = &parts[1];
-            } else {
-                value = 0.0;
-                part = &parts[2];
-            }
-        }
-        4 => {
-            if value > 0.0 {
-                part = &parts[0]
-            } else if value < 0.0 {
-                value = -value;
-                part = &parts[1];
-            } else {
-                value = 0.0;
-                part = &parts[2];
-            }
-        }
-        _ => {
-            return Formatted {
-                text: "#VALUE!".to_owned(),
-                color: None,
-                error: Some("Too many parts".to_owned()),
-            };
-        }
+    // IronXL: an empty code has no section and shows the empty text, as Excel does.
+    if parts.is_empty() {
+        return Formatted {
+            text: String::new(),
+            color: None,
+            error: None,
+        };
     }
+    if parts.len() > 4 {
+        return Formatted {
+            text: "#VALUE!".to_owned(),
+            color: None,
+            error: Some("Too many parts".to_owned()),
+        };
+    }
+    // IronXL: a number does not use a section with `@`, nor the fourth section, as Excel does. So
+    // the only number section of `0.00;@` serves every number and keeps the sign. A code with only
+    // `@` sections picks from the first three sections.
+    let mut numbers: Vec<&ParsePart> = parts.iter().take(3).filter(|p| !has_raw(p)).collect();
+    if numbers.is_empty() {
+        numbers = parts.iter().take(3).collect();
+    }
+    let part = match numbers[..] {
+        [first, second] => {
+            if value >= 0.0 {
+                first
+            } else {
+                value = -value;
+                second
+            }
+        }
+        [first, second, third] => {
+            if value > 0.0 {
+                first
+            } else if value < 0.0 {
+                value = -value;
+                second
+            } else {
+                value = 0.0;
+                third
+            }
+        }
+        // One section serves every number.
+        _ => numbers[0],
+    };
     match part {
         ParsePart::Error(..) => Formatted {
             text: "#VALUE!".to_owned(),
