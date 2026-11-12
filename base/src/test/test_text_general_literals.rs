@@ -48,6 +48,20 @@ fn text_general_shows_the_literals_before_and_after_general() {
 }
 
 #[test]
+fn text_general_shows_the_currency_symbol_in_its_place() {
+    assert_results(&[
+        ("=TEXT(5,\"[$€]\"\"x\"\"General\")", "€x5"),
+        ("=TEXT(5,\"[$€]General\")", "€5"),
+        ("=TEXT(5,\"General[$€]\")", "5€"),
+        ("=TEXT(5,\"\"\"a\"\"[$€]General\"\"b\"\"\")", "a€5b"),
+        ("=TEXT(5,\"[$€-407]General\")", "€5"),
+        ("=TEXT(5,\"[$£]General[$€]\")", "£5€"),
+        ("=TEXT(-5,\"General;[$€]General\")", "€5"),
+        ("=TEXT(-5,\"[$€]General\")", "€-5"),
+    ]);
+}
+
+#[test]
 fn text_general_with_one_section_keeps_the_sign_in_the_general_text() {
     assert_results(&[
         ("=TEXT(-5,\"\"\"x\"\"General\")", "x-5"),
