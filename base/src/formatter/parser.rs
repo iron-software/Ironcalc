@@ -67,7 +67,12 @@ pub struct DatePart {
 
 pub struct ErrorPart {}
 
-pub struct GeneralPart {}
+/// IronXL: a section with `General` and literal parts, such as `"x"General`. The section shows
+/// the text of `before`, the General text of the value, and the text of `after`.
+pub struct GeneralPart {
+    pub before: Vec<TextToken>,
+    pub after: Vec<TextToken>,
+}
 
 pub enum ParsePart {
     Number(NumberPart),
@@ -131,6 +136,22 @@ fn is_second(token: &Token) -> bool {
     )
 }
 
+// IronXL: whether `token` can go with `General` in a section: `General`, a literal, a quoted
+// text, an escaped character, a space of `_x` or `*x`, a color, a condition, or a currency tag.
+fn is_general_literal(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::General
+            | Token::Literal(_)
+            | Token::Text(_)
+            | Token::Ghost(_)
+            | Token::Spacer(_)
+            | Token::Color(_)
+            | Token::Condition(..)
+            | Token::Currency(_)
+    )
+}
+
 // Numbers:
 // [integer section][decimal point][fractional section][optional exponent]
 // So #,##0.00 is valid but 0.00#,## is not.
@@ -183,6 +204,10 @@ impl Parser {
         let mut index = 0;
         let mut currency = None;
         let mut is_time = false;
+        // IronXL: the count of tokens before `General`, and whether each other token of the section
+        // is a literal part that can go with `General`.
+        let mut general_at = None;
+        let mut only_literals = true;
 
         while token != Token::EOF && token != Token::Separator {
             let mut next_token = self.lexer.next_token();
@@ -199,13 +224,16 @@ impl Parser {
                     digit_count += 1;
                 }
             }
+            if !is_general_literal(&token) {
+                only_literals = false;
+            }
             match token {
                 Token::General => {
-                    if tokens.is_empty() {
-                        return ParsePart::General(GeneralPart {});
-                    } else {
-                        return ParsePart::Error(ErrorPart {});
+                    // IronXL: a second `General` in the section makes the section invalid.
+                    if general_at.is_some() {
+                        only_literals = false;
                     }
+                    general_at = Some(tokens.len());
                 }
                 Token::Comma => {
                     // If it is in between digit tokens then we use the thousand separator
@@ -441,6 +469,18 @@ impl Parser {
             last_token_is_digit = token_is_digit;
             last_token_is_second = token_is_second;
             token = next_token;
+        }
+        if let Some(at) = general_at {
+            // IronXL: `General` goes with literal parts only, as Excel reads `"x"General`. With a
+            // digit placeholder, a date part, or another code part, the section is invalid.
+            if !only_literals {
+                return ParsePart::Error(ErrorPart {});
+            }
+            let after = tokens.split_off(at);
+            return ParsePart::General(GeneralPart {
+                before: tokens,
+                after,
+            });
         }
         if is_date {
             if is_number {
