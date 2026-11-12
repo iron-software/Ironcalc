@@ -442,14 +442,14 @@ impl<'a> Parser<'a> {
         }
     }
 
+    // IronXL: the index of the sheet `name`, compared without case, as Excel compares sheet names. So a prefix
+    // such as `sheet2!A1` finds the sheet `Sheet2`.
     fn get_sheet_index_by_name(&self, name: &str) -> Option<u32> {
-        let worksheets = &self.worksheets;
-        for (i, sheet) in worksheets.iter().enumerate() {
-            if sheet == name {
-                return Some(i as u32);
-            }
-        }
-        None
+        let name = name.to_lowercase();
+        self.worksheets
+            .iter()
+            .position(|sheet| sheet.to_lowercase() == name)
+            .map(|index| index as u32)
     }
 
     // A reference node from the parts of a reference token. `sheet` is None for a reference without a sheet.
@@ -569,15 +569,6 @@ impl<'a> Parser<'a> {
                 absolute_row2,
             },
         }
-    }
-
-    // IronXL: the index of the sheet `name`, compared without case, as Excel compares sheet names.
-    fn get_sheet_index_by_name_without_case(&self, name: &str) -> Option<u32> {
-        let name = name.to_lowercase();
-        self.worksheets
-            .iter()
-            .position(|sheet| sheet.to_lowercase() == name)
-            .map(|index| index as u32)
     }
 
     // Returns the formula of the defined name `name` local to the sheet `sheet`, if any.
@@ -883,7 +874,7 @@ impl<'a> Parser<'a> {
     // IronXL: a 3-D reference needs a first end that is a sheet, or that no defined name in scope has. Else a text
     // such as `Remote:Sheet2!A2` is the name `Remote`, the range operator, and a reference on `Sheet2`.
     fn is_three_d_first_end(&self, end: &str) -> bool {
-        self.get_sheet_index_by_name_without_case(end).is_some()
+        self.get_sheet_index_by_name(end).is_some()
             || self
                 .get_sheet_index_by_name(&self.context.sheet)
                 .and_then(|sheet| self.get_defined_name(end, sheet))
@@ -912,8 +903,8 @@ impl<'a> Parser<'a> {
                 ),
             };
             return Node::Reference3DKind {
-                first_index: self.get_sheet_index_by_name_without_case(&first_sheet),
-                last_index: self.get_sheet_index_by_name_without_case(&last_sheet),
+                first_index: self.get_sheet_index_by_name(&first_sheet),
+                last_index: self.get_sheet_index_by_name(&last_sheet),
                 first_sheet,
                 last_sheet,
                 reference: Box::new(reference),
