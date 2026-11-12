@@ -47,6 +47,7 @@ mod test_name_reference;
 mod test_operator_parentheses;
 mod test_range_operator;
 mod test_rows_columns_array;
+mod test_sheet_prefix_case;
 mod test_sheet_qualified_defined_names;
 mod test_sheet_reference_range_operator;
 mod test_statistical_functions;
