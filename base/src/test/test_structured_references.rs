@@ -2,7 +2,8 @@
 
 //! IronXL: the engine resolves Excel's structured references from the tables that `Model::add_tables` gives:
 //! columns, column ranges, special items, `@` for this row, references without a table name, the `'` escape, and
-//! table and column names without case. A reference that the tables cannot resolve gives `#REF!`.
+//! table and column names without case. A reference that the tables cannot resolve gives `#REF!`, and `#This Row`
+//! outside the body rows gives `#VALUE!`.
 
 use crate::model::Model;
 use crate::test::util::new_empty_model;
@@ -182,18 +183,23 @@ fn unresolved_references_give_ref() {
     // A reference without a table name outside a table
     assert_eq!(value_at("Sheet1!F2", "=[@Quantity]"), "#REF!");
     assert_eq!(value_at("Sheet1!F2", "=SUM([Quantity])"), "#REF!");
-    // #This Row outside the body rows: the header row, the totals row, and a row below the table
-    assert_eq!(value_at("Sheet1!H1", "=Sales[@Quantity]"), "#REF!");
-    assert_eq!(value_at("Sheet1!H5", "=Sales[@Quantity]"), "#REF!");
-    assert_eq!(
-        value_at("Sheet1!H20", "=Sales[[#This Row],[Quantity]]"),
-        "#REF!"
-    );
     // #Totals of a table without a totals row
     assert_eq!(value_at("Sheet1!F1", "=SUM(Plain[#Totals])"), "#REF!");
     assert_eq!(
         value_at("Sheet1!F1", "=SUM(Plain[[#Totals],[Jan]])"),
         "#REF!"
+    );
+}
+
+#[test]
+fn this_row_outside_the_body_rows_gives_value() {
+    // Excel gives #VALUE! in the header row, the totals row, and a row below the table
+    assert_eq!(value_at("Sheet1!H1", "=Sales[@Quantity]"), "#VALUE!");
+    assert_eq!(value_at("Sheet1!H5", "=Sales[@Quantity]"), "#VALUE!");
+    assert_eq!(value_at("Sheet1!H20", "=Sales[@Quantity]"), "#VALUE!");
+    assert_eq!(
+        value_at("Sheet1!H20", "=Sales[[#This Row],[Quantity]]"),
+        "#VALUE!"
     );
 }
 

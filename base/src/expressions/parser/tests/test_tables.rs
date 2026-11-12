@@ -102,3 +102,35 @@ fn simple_table() {
         "SUBTOTAL(109,'Sheet One'!$A$2:$A$3)"
     );
 }
+
+#[test]
+fn this_row_outside_the_body_rows_parses_to_value() {
+    let worksheets = vec!["Sheet One".to_string()];
+    // The table A1:G3: the header row 1 and the body rows 2 and 3
+    let column_names = ["Jan", "Feb", "Mar", "Apr", "Dec", "Year"];
+    let tables = create_test_table("tblIncome", &column_names, "A1", 3);
+    let mut parser = new_parser(worksheets, vec![], tables);
+    // The header row 1, and the row 4 below the table
+    for row in [1, 4] {
+        let cell_reference = CellReferenceRC {
+            sheet: "Sheet One".to_string(),
+            row,
+            column: 8,
+        };
+        let t = parser.parse("tblIncome[@Jan]", &cell_reference);
+        assert_eq!(to_english_localized_string(&t, &cell_reference), "#VALUE!");
+        let t = parser.parse("SUM(tblIncome[[#This Row],[Jan]:[Dec]])", &cell_reference);
+        assert_eq!(
+            to_english_localized_string(&t, &cell_reference),
+            "SUM(#VALUE!)"
+        );
+    }
+    // A body row keeps its own row
+    let cell_reference = CellReferenceRC {
+        sheet: "Sheet One".to_string(),
+        row: 3,
+        column: 8,
+    };
+    let t = parser.parse("tblIncome[@Jan]", &cell_reference);
+    assert_eq!(to_english_localized_string(&t, &cell_reference), "$A$3");
+}

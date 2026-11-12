@@ -1297,8 +1297,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Changes a structured reference into the reference of its current cells, from the table model of the
-    /// workbook. A reference that names no table or no column, `#This Row` outside the body rows, `#Headers`
-    /// without a header row, and `#Totals` without a totals row give `#REF!`.
+    /// workbook. A reference that names no table or no column, `#Headers` without a header row, and `#Totals`
+    /// without a totals row give `#REF!`. `#This Row` outside the body rows gives `#VALUE!`, as in Excel.
     ///
     /// table_name[column_name] => cell1:cell2
     /// table_name[[#This Row], [column_name]:[column_name]] => cell1:cell2
@@ -1350,13 +1350,12 @@ impl<'a> Parser<'a> {
             {
                 (context.row, context.row)
             }
+            Some(token::TableSpecifier::ThisRow) => return Node::ErrorKind(token::Error::VALUE),
             Some(token::TableSpecifier::HeadersData) => (first_row, last_data_row),
             Some(token::TableSpecifier::DataTotals) => (first_data_row, last_row),
-            Some(
-                token::TableSpecifier::Headers
-                | token::TableSpecifier::Totals
-                | token::TableSpecifier::ThisRow,
-            ) => return reference_error,
+            Some(token::TableSpecifier::Headers | token::TableSpecifier::Totals) => {
+                return reference_error
+            }
         };
         if row_start > row_end {
             return reference_error;
