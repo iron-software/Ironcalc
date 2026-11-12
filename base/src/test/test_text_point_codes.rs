@@ -70,6 +70,15 @@ fn text_shows_a_finite_mantissa_for_a_very_small_or_large_value() {
 }
 
 #[test]
+fn text_shows_the_15_significant_digits_of_a_very_small_value() {
+    assert_results(&[
+        ("=TEXT(-9.25E-310,\"0.0E+0\")", "-9.2E-310"),
+        ("=TEXT(1E-323,\"0.00E+00\")", "9.88E-324"),
+        ("=TEXT(5E-324,\"0.0E+0\")", "4.9E-324"),
+    ]);
+}
+
+#[test]
 fn text_shows_a_number_with_a_text_section_as_general() {
     assert_results(&[
         ("=TEXT(0.5,\"@\")", "0.5"),

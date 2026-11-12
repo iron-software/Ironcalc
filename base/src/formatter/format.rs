@@ -92,8 +92,10 @@ fn rounded(value: f64, decimals: i32) -> f64 {
 /// `whole` and `decimals` are the counts of the digit placeholders before and after the point.
 /// The exponent is a multiple of `whole`, as Excel shows `##0.0E+0`. With no digit placeholder
 /// before the point, the mantissa is from 0.1 to below 1, as Excel shows `.0E+0`. The mantissa
-/// rounds to `decimals` digits, and a carry moves the exponent, so 9.999 with `0.00E+00` shows
-/// `1.00E+01`. Zero has the exponent 0.
+/// and the exponent come from the 15 significant digits of the value, as the display text of
+/// IronXL reads them, so -9.25E-310 (stored as 9.24999999999998E-310) with `0.0E+0` shows
+/// `-9.2E-310`. The mantissa rounds to `decimals` digits, and a carry moves the exponent, so
+/// 9.999 with `0.00E+00` shows `1.00E+01`. Zero has the exponent 0.
 fn scientific(value: f64, whole: i32, decimals: i32) -> (f64, i32) {
     let size = value.abs();
     if size == 0.0 {
@@ -101,7 +103,7 @@ fn scientific(value: f64, whole: i32, decimals: i32) -> (f64, i32) {
     }
     let whole = whole.max(i32::from(decimals == 0));
     let step = whole.max(1);
-    let form = format!("{size:e}");
+    let form = format!("{size:.14e}");
     let (_, exponent) = form.split_once('e').unwrap_or_default();
     let mut exponent: i32 = exponent.parse().unwrap_or_default();
     exponent -= exponent.rem_euclid(step);
@@ -116,7 +118,7 @@ fn scientific(value: f64, whole: i32, decimals: i32) -> (f64, i32) {
     (mantissa.copysign(value), exponent)
 }
 
-/// IronXL: the value of `form`, the `{:e}` text of a value, divided by 10 to the `exponent`. The
+/// IronXL: the value of `form`, the `{:.14e}` text of a value, divided by 10 to the `exponent`. The
 /// power is only the small difference of the two exponents, so a value below 1E-308 or near
 /// 1.8E+308 gives a finite mantissa, as Excel shows 1E-310 with `0.0E+0` as `1.0E-310`.
 fn scaled(form: &str, exponent: i32) -> f64 {
