@@ -182,6 +182,19 @@ fn cell_general(value: f64) -> String {
     )
 }
 
+/// IronXL: the text of the literal parts of a General section. A space of `_x` or `*x` gives one
+/// space, as for a number.
+fn literal_text(tokens: &[TextToken]) -> String {
+    tokens
+        .iter()
+        .map(|token| match token {
+            TextToken::Literal(c) => c.to_string(),
+            TextToken::Text(t) => t.clone(),
+            _ => " ".to_string(),
+        })
+        .collect()
+}
+
 /// IronXL: `text` without the zeros at the end of its decimals, and without a point at the end.
 fn without_trailing_zeros(text: String) -> String {
     if text.contains('.') {
@@ -429,11 +442,20 @@ fn format_number_with_general(
             color: None,
             error: Some("Problem parsing format string".to_owned()),
         },
-        ParsePart::General(..) => {
-            let mut text = general(value);
+        ParsePart::General(p) => {
+            let mut general_text = general(value);
             if locale.numbers.symbols.decimal != "." {
-                text = text.replace('.', &locale.numbers.symbols.decimal.to_string());
+                general_text =
+                    general_text.replace('.', &locale.numbers.symbols.decimal.to_string());
             }
+            // IronXL: the literal parts of the section go before and after the General text, as
+            // Excel shows 5 with `"x"General` as `x5`. The General text keeps the sign of a value
+            // of a code with one section.
+            let text = format!(
+                "{}{general_text}{}",
+                literal_text(&p.before),
+                literal_text(&p.after)
+            );
             Formatted {
                 text,
                 color: None,
