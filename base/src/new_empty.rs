@@ -183,7 +183,9 @@ impl<'a> Model<'a> {
         // they must be parsed with the English parser regardless of the
         // user's active language.
         self.parser.set_workbook_names_only(scope.is_none());
+        self.parser.set_defined_name_formula(true);
         let node = self.parse_internal_formula(formula_body, &context);
+        self.parser.set_defined_name_formula(false);
         self.parser.set_workbook_names_only(false);
         let relative = matches!(
             node,

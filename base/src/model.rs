@@ -3760,6 +3760,26 @@ impl<'a> Model<'a> {
         Ok(())
     }
 
+    /// Adds tables to the workbook, by their display names, then parses the workbook again once.
+    ///
+    /// The parser changes each structured reference, such as `Sales[Amount]` or `[@Amount]`, into the current cells
+    /// of its table when it parses a formula, and keeps that reference. So add the tables before the defined names and
+    /// the cells that use them; to change a table, make the model again.
+    /// A table with the display name of a table of the workbook, without case, replaces that table.
+    pub fn add_tables(&mut self, tables: Vec<Table>) {
+        for table in tables {
+            let name = table.display_name.to_lowercase();
+            self.workbook
+                .tables
+                .retain(|key, _| key.to_lowercase() != name);
+            self.workbook
+                .tables
+                .insert(table.display_name.clone(), table);
+        }
+        self.parser.set_tables(self.workbook.tables.clone());
+        self.reset_parsed_structures();
+    }
+
     /// Adds a defined name with any formula that parses, such as a reference, a constant
     /// (`0.2`), or a formula (`OFFSET(Sheet1!$A$1,0,0,Sheet1!$B$1)`).
     ///
@@ -3834,7 +3854,10 @@ impl<'a> Model<'a> {
         }
         let formula_body = formula.strip_prefix('=').unwrap_or(formula);
         let context = self.defined_name_context();
-        if let Node::ParseErrorKind { .. } = self.parse_internal_formula(formula_body, &context) {
+        self.parser.set_defined_name_formula(true);
+        let node = self.parse_internal_formula(formula_body, &context);
+        self.parser.set_defined_name_formula(false);
+        if let Node::ParseErrorKind { .. } = node {
             return Err("Formula: Invalid defined name formula".to_string());
         }
         Ok(sheet_id)

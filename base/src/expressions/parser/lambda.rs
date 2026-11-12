@@ -1,5 +1,5 @@
 use crate::expressions::parser::{ExpectedTokens, NamedVariable, Node, Parser};
-use crate::expressions::token::TokenType;
+use crate::expressions::token::{TableReference, TokenType};
 
 impl<'a> Parser<'a> {
     // Called after `LAMBDA` and the opening `(` have been consumed.
@@ -30,19 +30,35 @@ impl<'a> Parser<'a> {
             // hint has to be stamped explicitly.
             self.set_argument_hint("LAMBDA", arg_index);
 
-            // Optional parameter syntax: [name]
-            let bracket_optional = self.lexer.peek_token() == TokenType::LeftBracket;
+            // Optional parameter syntax: [name]. The lexer reads `[name]` as a structured reference without a table
+            // name when no name follows it.
+            let (bracket_optional, bracketed_name) = match self.lexer.peek_token() {
+                TokenType::LeftBracket => (true, None),
+                TokenType::StructuredReference {
+                    table_name,
+                    specifier: None,
+                    table_reference: Some(TableReference::ColumnReference(name)),
+                } if table_name.is_empty() => (true, Some(name)),
+                _ => (false, None),
+            };
             if bracket_optional {
-                // consume '['
+                // consume '[', or the whole '[name]'
                 self.lexer.advance_token();
             }
 
-            let expr = self.parse_expr();
+            let one_token = bracketed_name.is_some();
+            let expr = match bracketed_name {
+                Some(name) => Node::NamedVariableKind {
+                    name: name.trim_start_matches("_xlpm.").to_string(),
+                    id: None,
+                },
+                None => self.parse_expr(),
+            };
             if let Node::ParseErrorKind { .. } = expr {
                 return expr;
             }
 
-            if bracket_optional {
+            if bracket_optional && !one_token {
                 if let Err(err) = self.lexer.expect(TokenType::RightBracket) {
                     return Node::ParseErrorKind {
                         formula: self.lexer.get_formula(),
