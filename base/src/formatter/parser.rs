@@ -208,6 +208,10 @@ impl Parser {
         // is a literal part that can go with `General`.
         let mut general_at = None;
         let mut only_literals = true;
+        // IronXL: the symbol of each currency tag, the count of tokens before it, and whether it
+        // goes before `General`. A General section shows the symbol in its place, as Excel shows
+        // 5 with `[$€]General` as `€5`.
+        let mut currency_symbols = vec![];
 
         while token != Token::EOF && token != Token::Separator {
             let mut next_token = self.lexer.next_token();
@@ -288,6 +292,7 @@ impl Parser {
                 }
                 Token::Currency(c) => {
                     currency = Some(c);
+                    currency_symbols.push((tokens.len(), c, general_at.is_none()));
                 }
                 Token::QuestionMark => {
                     tokens.push(TextToken::Digit(Digit {
@@ -475,6 +480,15 @@ impl Parser {
             // digit placeholder, a date part, or another code part, the section is invalid.
             if !only_literals {
                 return ParsePart::Error(ErrorPart {});
+            }
+            let mut at = at;
+            for (count, (position, symbol, before_general)) in
+                currency_symbols.into_iter().enumerate()
+            {
+                tokens.insert(position + count, TextToken::Literal(symbol));
+                if before_general {
+                    at += 1;
+                }
             }
             let after = tokens.split_off(at);
             return ParsePart::General(GeneralPart {
