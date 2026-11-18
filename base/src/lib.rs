@@ -50,6 +50,7 @@ pub mod wasm_host;
 
 pub use crate::constants::COLUMN_WIDTH_FACTOR;
 pub use crate::constants::ROW_HEIGHT_FACTOR;
+pub use crate::formula_at_cell::FormulaResult;
 
 mod actions;
 mod arithmetic;
@@ -57,6 +58,7 @@ mod cast;
 mod conditional_formatting;
 mod constants;
 mod cut_paste;
+mod formula_at_cell;
 mod functions;
 mod implicit_intersection;
 mod model;
