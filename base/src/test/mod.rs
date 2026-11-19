@@ -23,6 +23,7 @@ mod test_days360_month_end;
 mod test_degrees_radians;
 mod test_error_propagation;
 mod test_evaluate_cells;
+mod test_evaluate_formula_at;
 mod test_fact_factdouble;
 mod test_fn_accrint;
 mod test_fn_accrintm;

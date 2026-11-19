@@ -238,6 +238,9 @@ pub struct Model<'a> {
     pub(crate) cf_cache: HashMap<(u32, i32, i32), Vec<CfCellResult>>,
     /// IronXL: the date system of date functions and the number formatter.
     pub(crate) date_system: DateSystem,
+    /// IronXL: true while `evaluate_formula_at` runs. A cell then gives its current value, and a formula
+    /// cell its current result, without an evaluation, so the model stays as it was.
+    pub(crate) read_only: bool,
 }
 
 // FIXME: Maybe this should be the same as CellReference
@@ -1548,6 +1551,11 @@ impl<'a> Model<'a> {
             None => return CalcResult::EmptyCell,
         };
 
+        // IronXL: `evaluate_formula_at` reads each cell as it is and evaluates no formula again.
+        if self.read_only {
+            return self.get_cell_value(&original_cell, cell_reference);
+        }
+
         if let Cell::SpillCell { a, .. } = original_cell {
             // If it is part of an array or dynamic formula we need to evaluate the anchor cell
             // strictly speaking we don't need to evaluate the anchor cell of a dynamic array formula
@@ -1858,6 +1866,7 @@ impl<'a> Model<'a> {
             support: HashMap::new(),
             cf_cache: HashMap::new(),
             date_system: DateSystem::default(),
+            read_only: false,
         };
 
         model.parse_formulas();

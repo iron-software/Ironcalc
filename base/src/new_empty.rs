@@ -746,6 +746,7 @@ impl<'a> Model<'a> {
             support: HashMap::new(),
             cf_cache: HashMap::new(),
             date_system: DateSystem::default(),
+            read_only: false,
         };
         model.parse_formulas();
         model.evaluate_conditional_formatting();
